@@ -1,123 +1,234 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import AbilityScores from './AbilityScores'
+import AttackEditor from './AttackEditor'
+import SpellEditor from './SpellEditor'
 import SpellSlots from './SpellSlots'
 import { EMPTY_PLAYER } from '../utils/helpers'
 
-const CLASSES = ['Artificer','Barbarian','Bard','Cleric','Druid','Fighter',
-  'Monk','Paladin','Ranger','Rogue','Sorcerer','Warlock','Wizard']
-const RACES = ['Dragonborn','Dwarf','Elf','Gnome','Half-Elf','Half-Orc',
-  'Halfling','Human','Tiefling','Aasimar','Genasi','Tabaxi','Other']
+const CLASSES = [
+  'Artificer','Barbarian','Bard','Cleric','Druid','Fighter',
+  'Monk','Paladin','Ranger','Rogue','Sorcerer','Warlock','Wizard',
+]
+const RACES = [
+  'Dragonborn','Dwarf','Elf','Gnome','Half-Elf','Half-Orc',
+  'Halfling','Human','Tiefling','Aasimar','Genasi','Tabaxi','Other',
+]
 
-const TABS = ['Stats', 'Spells', 'Notes']
+const TABS = ['Stats', 'Attacks', 'Spells', 'Notes']
 
-export default function PlayerForm({ initial, onSave }) {
-  const [data, setData] = useState({ ...EMPTY_PLAYER, ...initial })
+export default function PlayerForm({ initial, onSave, onClose }) {
+  const [data, setData] = useState(() => ({
+    ...EMPTY_PLAYER,
+    spells: [],
+    attacks: [],
+    ...(initial ?? {}),
+  }))
   const [tab, setTab] = useState('Stats')
 
   const set = (field, val) => setData(d => ({ ...d, [field]: val }))
 
-  const handleSave = () => {
+  function handleSave() {
     if (!data.name.trim()) { alert('Character needs a name!'); return }
     onSave({ ...data, maxHp: data.hp })
   }
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
+      {/* Tab bar */}
+      <div style={{
+        display: 'flex',
+        borderBottom: '1px solid var(--border)',
+        marginBottom: 18,
+      }}>
         {TABS.map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '8px 16px', border: 'none', background: 'none', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', fontSize: 14, fontWeight: tab === t ? 600 : 400,
-            color: tab === t ? 'var(--accent)' : 'var(--text2)',
-            borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            marginBottom: -1,
-          }}>{t}</button>
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            style={{
+              padding: '8px 16px',
+              border: 'none',
+              background: 'none',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: tab === t ? 600 : 400,
+              fontFamily: 'DM Sans, sans-serif',
+              color: tab === t ? 'var(--accent)' : 'var(--text2)',
+              borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
+              marginBottom: -1,
+              transition: 'color 0.12s',
+            }}
+          >
+            {t}
+            {t === 'Attacks' && data.attacks?.length > 0 && (
+              <span style={{ marginLeft: 5, fontSize: 10, background: 'var(--surface2)', color: 'var(--text3)', padding: '1px 5px', borderRadius: 99 }}>
+                {data.attacks.length}
+              </span>
+            )}
+            {t === 'Spells' && data.spells?.length > 0 && (
+              <span style={{ marginLeft: 5, fontSize: 10, background: 'var(--surface2)', color: 'var(--text3)', padding: '1px 5px', borderRadius: 99 }}>
+                {data.spells.length}
+              </span>
+            )}
+          </button>
         ))}
       </div>
 
+      {/* Stats tab */}
       {tab === 'Stats' && (
-        <div className="form-grid">
-          <div className="form-row">
-            <div className="form-group" style={{ gridColumn: 'span 2' }}>
-              <label className="form-label">Character Name *</label>
-              <input className="form-input" value={data.name}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Name + Player Name */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 2 }}>
+              <div className="field-label">Character Name *</div>
+              <input
+                value={data.name}
                 placeholder="e.g. Thalindra Moonshadow"
-                onChange={e => set('name', e.target.value)} />
+                onChange={e => set('name', e.target.value)}
+              />
             </div>
-            <div className="form-group">
-              <label className="form-label">Player Name</label>
-              <input className="form-input" value={data.playerName}
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Player Name</div>
+              <input
+                value={data.playerName ?? ''}
                 placeholder="Optional"
-                onChange={e => set('playerName', e.target.value)} />
+                onChange={e => set('playerName', e.target.value)}
+              />
             </div>
           </div>
 
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Race</label>
-              <select className="form-select" value={data.race} onChange={e => set('race', e.target.value)}>
+          {/* Race + Class + Level */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Race</div>
+              <select value={data.race ?? ''} onChange={e => set('race', e.target.value)}>
                 <option value="">— Select —</option>
                 {RACES.map(r => <option key={r}>{r}</option>)}
               </select>
             </div>
-            <div className="form-group">
-              <label className="form-label">Class</label>
-              <select className="form-select" value={data.class} onChange={e => set('class', e.target.value)}>
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Class</div>
+              <select value={data.class ?? ''} onChange={e => set('class', e.target.value)}>
                 <option value="">— Select —</option>
                 {CLASSES.map(c => <option key={c}>{c}</option>)}
               </select>
             </div>
-            <div className="form-group">
-              <label className="form-label">Level</label>
-              <input className="form-input" type="number" min={1} max={20} value={data.level}
-                onChange={e => set('level', parseInt(e.target.value) || 1)} />
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Level</div>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={data.level ?? 1}
+                onChange={e => set('level', parseInt(e.target.value) || 1)}
+              />
             </div>
           </div>
 
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Max HP</label>
-              <input className="form-input" type="number" min={1} value={data.hp}
-                onChange={e => set('hp', parseInt(e.target.value) || 1)} />
+          {/* HP + AC + Speed + Initiative */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Max HP</div>
+              <input
+                type="number"
+                min={1}
+                value={data.hp}
+                onChange={e => set('hp', parseInt(e.target.value) || 1)}
+              />
             </div>
-            <div className="form-group">
-              <label className="form-label">Armor Class</label>
-              <input className="form-input" type="number" min={1} value={data.ac}
-                onChange={e => set('ac', parseInt(e.target.value) || 10)} />
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Armor Class</div>
+              <input
+                type="number"
+                min={1}
+                value={data.ac}
+                onChange={e => set('ac', parseInt(e.target.value) || 10)}
+              />
             </div>
-            <div className="form-group">
-              <label className="form-label">Initiative Mod</label>
-              <input className="form-input" type="number" value={data.initiativeMod}
-                onChange={e => set('initiativeMod', parseInt(e.target.value) || 0)} />
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Speed (ft)</div>
+              <input
+                type="number"
+                min={0}
+                step={5}
+                value={data.speed ?? 30}
+                onChange={e => set('speed', parseInt(e.target.value) || 30)}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Initiative Mod</div>
+              <input
+                type="number"
+                value={data.initiativeMod ?? 0}
+                onChange={e => set('initiativeMod', parseInt(e.target.value) || 0)}
+              />
             </div>
           </div>
 
+          {/* Ability scores */}
           <div>
-            <div className="section-label">Ability Scores</div>
-            <AbilityScores abilities={data.abilities}
-              onChange={val => set('abilities', val)} />
+            <div className="field-label" style={{ marginBottom: 8 }}>Ability Scores</div>
+            <AbilityScores
+              abilities={data.abilities}
+              onChange={val => set('abilities', val)}
+            />
           </div>
         </div>
       )}
 
+      {/* Attacks tab */}
+      {tab === 'Attacks' && (
+        <AttackEditor
+          attacks={data.attacks ?? []}
+          onChange={val => set('attacks', val)}
+        />
+      )}
+
+      {/* Spells tab */}
       {tab === 'Spells' && (
-        <div className="form-grid">
-          <div className="section-label">Spell Slots per Level</div>
-          <SpellSlots slots={data.spellSlots} onChange={val => set('spellSlots', val)} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div className="field-label" style={{ marginBottom: 8 }}>Spell Slots per Level</div>
+            <SpellSlots
+              slots={data.spellSlots ?? {}}
+              onChange={val => set('spellSlots', val)}
+            />
+          </div>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+            <div className="field-label" style={{ marginBottom: 8 }}>Known Spells</div>
+            <SpellEditor
+              spells={data.spells ?? []}
+              onChange={val => set('spells', val)}
+            />
+          </div>
         </div>
       )}
 
+      {/* Notes tab */}
       {tab === 'Notes' && (
-        <div className="form-group">
-          <label className="form-label">Notes</label>
-          <textarea className="form-textarea" rows={8} value={data.notes}
+        <div>
+          <div className="field-label" style={{ marginBottom: 6 }}>Notes</div>
+          <textarea
+            rows={8}
+            value={data.notes ?? ''}
             placeholder="Background, personality, features, equipment..."
-            onChange={e => set('notes', e.target.value)} />
+            onChange={e => set('notes', e.target.value)}
+          />
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-        <button className="btn btn-primary" onClick={handleSave}>Save Character</button>
+      {/* Footer */}
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end', gap: 8,
+        marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)',
+      }}>
+        {onClose && (
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        )}
+        <button type="button" className="btn btn-accent" onClick={handleSave}>
+          Save Character
+        </button>
       </div>
     </div>
   )

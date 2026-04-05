@@ -8,7 +8,8 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 const NAV_ITEMS = [
   {
     id: 'monsters',
-    label: 'Monsters',
+    label: 'Monster Library',
+    sub: 'Manage creatures',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
@@ -21,18 +22,22 @@ const NAV_ITEMS = [
   },
   {
     id: 'players',
-    label: 'Players',
+    label: 'Player Roster',
+    sub: 'Party members',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
-        <circle cx="12" cy="8" r="4" />
-        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+        <circle cx="9" cy="7" r="3.5" />
+        <path d="M2 20c0-3.5 3-6 7-6" />
+        <circle cx="17" cy="7" r="3.5" />
+        <path d="M14 14c4 0 8 2.5 8 6" />
       </svg>
     ),
   },
   {
     id: 'encounter',
-    label: 'Encounter',
+    label: 'Encounter Builder',
+    sub: 'Build your fight',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
@@ -42,7 +47,8 @@ const NAV_ITEMS = [
   },
   {
     id: 'combat',
-    label: 'Combat',
+    label: 'Combat Runner',
+    sub: 'Run the battle',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
@@ -55,63 +61,115 @@ const NAV_ITEMS = [
   },
 ];
 
+const PAGE_ACTIONS = {
+  monsters: ({ setEditing }) => (
+    <button className="btn btn-accent btn-sm" onClick={() => setEditing('new')}>
+      + Add Monster
+    </button>
+  ),
+  players: ({ setEditing }) => (
+    <button className="btn btn-accent btn-sm" onClick={() => setEditing('new')}>
+      + Add Player
+    </button>
+  ),
+};
+
 export default function App() {
   const [tab, setTab] = useState('monsters');
-
   const [monsters, setMonsters] = useLocalStorage('dnd_monsters', []);
-  const [players, setPlayers] = useLocalStorage('dnd_players', []);
+  const [players, setPlayers]   = useLocalStorage('dnd_players', []);
   const [encounter, setEncounter] = useLocalStorage('dnd_encounter', []);
 
-  const tabLabel = NAV_ITEMS.find(n => n.id === tab)?.label ?? '';
+  // Lifted "new entity" state so the page header button can trigger the form
+  const [monsterEditing, setMonsterEditing] = useState(null);
+  const [playerEditing, setPlayerEditing]   = useState(null);
+
+  const currentNav = NAV_ITEMS.find(n => n.id === tab);
 
   return (
     <div className="app-shell">
-      {/* ── Header ── */}
-      <header className="app-header">
-        <span className="app-title">
-          D<span className="app-title-accent">&amp;</span>D
-        </span>
-        <span className="header-badge">{tabLabel}</span>
-      </header>
+      {/* ── Sidebar ── */}
+      <aside className="sidebar">
+        <div className="sidebar-logo">
+          <div className="app-title">
+            D<span className="app-title-accent">&amp;</span>D
+          </div>
+          <div className="app-subtitle">Encounter Manager</div>
+        </div>
 
-      {/* ── Page content ── */}
-      <main className="main-content">
-        {tab === 'monsters' && (
-          <MonsterLibrary monsters={monsters} setMonsters={setMonsters} />
-        )}
-        {tab === 'players' && (
-          <PlayerRoster players={players} setPlayers={setPlayers} />
-        )}
-        {tab === 'encounter' && (
-          <EncounterBuilder
-            monsters={monsters}
-            players={players}
-            encounter={encounter}
-            setEncounter={setEncounter}
-          />
-        )}
-        {tab === 'combat' && (
-          <CombatRunner
-            encounter={encounter}
-            setEncounter={setEncounter}
-            players={players}
-          />
-        )}
-      </main>
+        <nav className="sidebar-nav">
+          {NAV_ITEMS.map(item => (
+            <button
+              key={item.id}
+              className={`nav-item${tab === item.id ? ' active' : ''}`}
+              onClick={() => setTab(item.id)}
+            >
+              {item.icon}
+              <span className="nav-label">{item.label}</span>
+            </button>
+          ))}
+        </nav>
 
-      {/* ── Bottom nav ── */}
-      <nav className="bottom-nav">
-        {NAV_ITEMS.map(item => (
-          <button
-            key={item.id}
-            className={`nav-btn${tab === item.id ? ' active' : ''}`}
-            onClick={() => setTab(item.id)}
-          >
-            {item.icon}
-            {item.label}
-          </button>
-        ))}
-      </nav>
+        <div className="sidebar-footer">
+          {monsters.length} monster{monsters.length !== 1 ? 's' : ''} ·{' '}
+          {players.length} player{players.length !== 1 ? 's' : ''}
+        </div>
+      </aside>
+
+      {/* ── Main area ── */}
+      <div className="main-area">
+        {/* Page header */}
+        <div className="page-header">
+          <div className="page-title">{currentNav?.label}</div>
+          <div className="page-actions">
+            {tab === 'monsters' && (
+              <button className="btn btn-accent btn-sm" onClick={() => setMonsterEditing('new')}>
+                + Add Monster
+              </button>
+            )}
+            {tab === 'players' && (
+              <button className="btn btn-accent btn-sm" onClick={() => setPlayerEditing('new')}>
+                + Add Player
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Page content */}
+        <div className="page-content">
+          {tab === 'monsters' && (
+            <MonsterLibrary
+              monsters={monsters}
+              setMonsters={setMonsters}
+              externalEditing={monsterEditing}
+              setExternalEditing={setMonsterEditing}
+            />
+          )}
+          {tab === 'players' && (
+            <PlayerRoster
+              players={players}
+              setPlayers={setPlayers}
+              externalEditing={playerEditing}
+              setExternalEditing={setPlayerEditing}
+            />
+          )}
+          {tab === 'encounter' && (
+            <EncounterBuilder
+              monsters={monsters}
+              players={players}
+              encounter={encounter}
+              setEncounter={setEncounter}
+            />
+          )}
+          {tab === 'combat' && (
+            <CombatRunner
+              encounter={encounter}
+              setEncounter={setEncounter}
+              players={players}
+            />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
