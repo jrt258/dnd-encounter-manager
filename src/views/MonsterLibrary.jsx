@@ -1,122 +1,174 @@
-import React, { useState } from 'react'
-import { Plus, Edit2, Trash2, Skull, Search } from 'lucide-react'
-import Modal from '../components/Modal'
-import MonsterForm from '../components/MonsterForm'
-import { uid, modStr, abilityMod } from '../utils/helpers'
+import { useState } from 'react';
+import MonsterForm from '../components/MonsterForm';
 
 export default function MonsterLibrary({ monsters, setMonsters }) {
-  const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState(null);   // null | 'new' | monster object
+  const [expanded, setExpanded] = useState(null);
 
   const filtered = monsters.filter(m =>
-    m.name.toLowerCase().includes(search.toLowerCase()) ||
-    m.type?.toLowerCase().includes(search.toLowerCase())
-  )
+    m.name.toLowerCase().includes(search.toLowerCase())
+  );
 
-  const handleSave = (data) => {
-    if (editing) {
-      setMonsters(ms => ms.map(m => m.id === editing.id ? { ...data, id: editing.id } : m))
+  function saveMonster(data) {
+    if (editing === 'new') {
+      setMonsters(prev => [...prev, { ...data, id: Date.now().toString() }]);
     } else {
-      setMonsters(ms => [...ms, { ...data, id: uid() }])
+      setMonsters(prev => prev.map(m => m.id === editing.id ? { ...editing, ...data } : m));
     }
-    setShowForm(false)
-    setEditing(null)
+    setEditing(null);
   }
 
-  const handleDelete = (id) => {
-    if (!confirm('Delete this monster template?')) return
-    setMonsters(ms => ms.filter(m => m.id !== id))
+  function deleteMonster(id) {
+    if (!confirm('Delete this monster?')) return;
+    setMonsters(prev => prev.filter(m => m.id !== id));
+    if (expanded === id) setExpanded(null);
   }
 
-  const openEdit = (m) => { setEditing(m); setShowForm(true) }
+  const crLabel = cr => {
+    if (cr === undefined || cr === '') return '—';
+    const fracs = { '0.125': '⅛', '0.25': '¼', '0.5': '½' };
+    return fracs[String(cr)] ?? String(cr);
+  };
 
   return (
-    <div className="view">
-      <div className="page-header">
-        <h1 className="page-title">Monster Library</h1>
-        <p className="page-subtitle">Reusable monster templates for your encounters.</p>
-      </div>
-
-      <div className="action-bar">
-        <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
-          <input className="form-input" style={{ paddingLeft: 32 }}
-            placeholder="Search monsters..."
-            value={search} onChange={e => setSearch(e.target.value)} />
+    <>
+      {/* Search + Add */}
+      <div className="gap-row" style={{ marginBottom: 12 }}>
+        <div className="search-bar" style={{ flex: 1, marginBottom: 0 }}>
+          <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search monsters…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
-        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowForm(true) }}>
-          <Plus size={15} /> New Monster
+        <button className="btn btn-accent" onClick={() => setEditing('new')}>
+          + Add
         </button>
       </div>
 
+      {/* List */}
       {filtered.length === 0 ? (
-        <div className="empty-state">
-          <Skull size={48} />
-          <p className="empty-state-title">{search ? 'No monsters match' : 'No monsters yet'}</p>
-          <p className="empty-state-subtitle">
-            {search ? 'Try a different search.' : 'Create a monster template to get started.'}
-          </p>
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">🐉</div>
+            {monsters.length === 0
+              ? 'No monsters yet. Add one to get started.'
+              : 'No monsters match your search.'}
+          </div>
         </div>
       ) : (
-        <div className="card-grid">
+        <div className="card">
           {filtered.map(m => (
-            <div key={m.id} className="card">
-              <div className="card-header">
-                <div>
-                  <div className="card-title">{m.name}</div>
-                  <div className="card-subtitle">
-                    CR {m.cr} · {m.type}
+            <div key={m.id}>
+              <div
+                className="list-row"
+                style={{ cursor: 'pointer' }}
+                onClick={() => setExpanded(expanded === m.id ? null : m.id)}
+              >
+                <div className="combatant-type-dot dot-monster" style={{ flexShrink: 0 }} />
+                <div className="list-row-main">
+                  <div className="list-row-title">{m.name}</div>
+                  <div className="list-row-sub">
+                    {m.type || 'Monster'}{m.size ? ` · ${m.size}` : ''}
+                    {m.cr !== undefined && m.cr !== '' ? ` · CR ${crLabel(m.cr)}` : ''}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(m)}><Edit2 size={13} /></button>
-                  <button className="btn btn-danger btn-icon btn-sm" onClick={() => handleDelete(m.id)}><Trash2 size={13} /></button>
+                <div className="list-row-right">
+                  <span className="tag tag-gray mono">{m.ac ?? '—'} AC</span>
+                  <span className="tag tag-red mono">{m.hp ?? '—'} HP</span>
+                  <svg style={{ width: 14, height: 14, color: 'var(--text3)', transform: expanded === m.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                    strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
                 </div>
               </div>
 
-              <div className="stat-row">
-                <div className="stat-chip">
-                  <span className="stat-chip-label">HP</span>
-                  <span className="stat-chip-value">{m.hp}</span>
-                </div>
-                <div className="stat-chip">
-                  <span className="stat-chip-label">AC</span>
-                  <span className="stat-chip-value">{m.ac}</span>
-                </div>
-                <div className="stat-chip">
-                  <span className="stat-chip-label">Init</span>
-                  <span className="stat-chip-value">{modStr(m.initiativeMod)}</span>
-                </div>
-                {Object.entries(m.abilities || {}).slice(0,3).map(([k,v]) => (
-                  <div key={k} className="stat-chip">
-                    <span className="stat-chip-label">{k}</span>
-                    <span className="stat-chip-value">{v}</span>
-                  </div>
-                ))}
-              </div>
+              {expanded === m.id && (
+                <div style={{ padding: '0 14px 14px', borderBottom: '1px solid var(--border)' }}>
+                  {/* Ability scores */}
+                  {m.abilities && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Ability Scores</div>
+                      <div className="ability-grid">
+                        {['str','dex','con','int','wis','cha'].map(ab => {
+                          const score = m.abilities?.[ab] ?? 10;
+                          const mod = Math.floor((score - 10) / 2);
+                          return (
+                            <div className="ability-cell" key={ab}>
+                              <span className="ability-name">{ab.toUpperCase()}</span>
+                              <span className="ability-score">{score}</span>
+                              <span className="ability-mod">{mod >= 0 ? `+${mod}` : mod}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
 
-              {m.attacks?.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  <div className="section-label">Attacks</div>
-                  {m.attacks.map(a => (
-                    <div key={a.id} style={{ fontSize: 13, color: 'var(--text2)', display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>{a.name}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-                        {a.hitBonus >= 0 ? '+' : ''}{a.hitBonus} · {a.damage}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+                  {/* Attacks */}
+                  {m.attacks?.length > 0 && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Attacks</div>
+                      <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                        {m.attacks.map((atk, i) => (
+                          <div className="attack-row" key={i}>
+                            <span className="attack-name">{atk.name}</span>
+                            {atk.toHit !== undefined && <span className="attack-stat">+{atk.toHit} to hit</span>}
+                            {atk.damage && <span className="attack-stat">{atk.damage}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
 
-              {Object.keys(m.spellSlots || {}).length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="section-label">Spell Slots</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {Object.entries(m.spellSlots).filter(([,v]) => v > 0).map(([l, v]) => (
-                      <span key={l} className="badge badge-purple">L{l}: {v}</span>
-                    ))}
+                  {/* Spell slots */}
+                  {m.spellSlots && Object.values(m.spellSlots).some(v => v > 0) && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Spell Slots</div>
+                      <div className="spell-slots-grid">
+                        {Object.entries(m.spellSlots).map(([lvl, count]) =>
+                          count > 0 ? (
+                            <div className="slot-level" key={lvl}>
+                              <span className="slot-level-label">{lvl}</span>
+                              <div className="slot-pips">
+                                {Array.from({ length: count }).map((_, i) => (
+                                  <div className="slot-pip" key={i} />
+                                ))}
+                              </div>
+                            </div>
+                          ) : null
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Notes */}
+                  {m.notes && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Notes</div>
+                      <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>{m.notes}</p>
+                    </>
+                  )}
+
+                  {/* Actions */}
+                  <div className="gap-row" style={{ marginTop: 14 }}>
+                    <button className="btn btn-ghost" onClick={() => setEditing(m)}>Edit</button>
+                    <button className="btn btn-icon danger" onClick={() => deleteMonster(m.id)}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14H6L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                        <path d="M9 6V4h6v2" />
+                      </svg>
+                    </button>
                   </div>
                 </div>
               )}
@@ -125,15 +177,14 @@ export default function MonsterLibrary({ monsters, setMonsters }) {
         </div>
       )}
 
-      {showForm && (
-        <Modal
-          title={editing ? `Edit — ${editing.name}` : 'New Monster Template'}
-          onClose={() => { setShowForm(false); setEditing(null) }}
-          wide
-        >
-          <MonsterForm initial={editing || {}} onSave={handleSave} />
-        </Modal>
+      {/* Form modal */}
+      {editing !== null && (
+        <MonsterForm
+          initial={editing === 'new' ? null : editing}
+          onSave={saveMonster}
+          onClose={() => setEditing(null)}
+        />
       )}
-    </div>
-  )
+    </>
+  );
 }

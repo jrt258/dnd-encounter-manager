@@ -1,108 +1,144 @@
-import React, { useState } from 'react'
-import { Plus, Edit2, Trash2, Users, Search } from 'lucide-react'
-import Modal from '../components/Modal'
-import PlayerForm from '../components/PlayerForm'
-import SpellSlots from '../components/SpellSlots'
-import { uid, modStr } from '../utils/helpers'
+import { useState } from 'react';
+import PlayerForm from '../components/PlayerForm';
 
 export default function PlayerRoster({ players, setPlayers }) {
-  const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState(null);
+  const [expanded, setExpanded] = useState(null);
 
-  const filtered = players.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.class?.toLowerCase().includes(search.toLowerCase()) ||
-    p.playerName?.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const handleSave = (data) => {
-    if (editing) {
-      setPlayers(ps => ps.map(p => p.id === editing.id ? { ...data, id: editing.id } : p))
+  function savePlayer(data) {
+    if (editing === 'new') {
+      setPlayers(prev => [...prev, { ...data, id: Date.now().toString() }]);
     } else {
-      setPlayers(ps => [...ps, { ...data, id: uid() }])
+      setPlayers(prev => prev.map(p => p.id === editing.id ? { ...editing, ...data } : p));
     }
-    setShowForm(false)
-    setEditing(null)
+    setEditing(null);
   }
 
-  const handleDelete = (id) => {
-    if (!confirm('Remove this character from the roster?')) return
-    setPlayers(ps => ps.filter(p => p.id !== id))
+  function deletePlayer(id) {
+    if (!confirm('Remove this player?')) return;
+    setPlayers(prev => prev.filter(p => p.id !== id));
+    if (expanded === id) setExpanded(null);
   }
-
-  const openEdit = (p) => { setEditing(p); setShowForm(true) }
 
   return (
-    <div className="view">
-      <div className="page-header">
-        <h1 className="page-title">Player Roster</h1>
-        <p className="page-subtitle">Your recurring adventuring party.</p>
-      </div>
-
-      <div className="action-bar">
-        <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
-          <input className="form-input" style={{ paddingLeft: 32 }}
-            placeholder="Search characters..."
-            value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-        <button className="btn btn-primary" onClick={() => { setEditing(null); setShowForm(true) }}>
-          <Plus size={15} /> New Character
+    <>
+      {/* Add button */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button className="btn btn-accent" onClick={() => setEditing('new')}>
+          + Add Player
         </button>
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="empty-state">
-          <Users size={48} />
-          <p className="empty-state-title">{search ? 'No characters match' : 'No characters yet'}</p>
-          <p className="empty-state-subtitle">
-            {search ? 'Try a different search.' : 'Add your party members to get started.'}
-          </p>
+      {players.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">🧙</div>
+            No players yet. Add your party members.
+          </div>
         </div>
       ) : (
-        <div className="card-grid">
-          {filtered.map(p => (
-            <div key={p.id} className="card">
-              <div className="card-header">
-                <div>
-                  <div className="card-title">{p.name}</div>
-                  <div className="card-subtitle">
-                    {[p.race, p.class, p.level ? `Level ${p.level}` : null].filter(Boolean).join(' · ')}
-                    {p.playerName && <span style={{ color: 'var(--text3)' }}> — {p.playerName}</span>}
+        <div className="card">
+          {players.map(p => (
+            <div key={p.id}>
+              <div
+                className="list-row"
+                style={{ cursor: 'pointer' }}
+                onClick={() => setExpanded(expanded === p.id ? null : p.id)}
+              >
+                <div className="combatant-type-dot dot-player" style={{ flexShrink: 0 }} />
+                <div className="list-row-main">
+                  <div className="list-row-title">{p.name}</div>
+                  <div className="list-row-sub">
+                    {[p.race, p.class, p.level ? `Level ${p.level}` : null]
+                      .filter(Boolean).join(' · ')}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(p)}><Edit2 size={13} /></button>
-                  <button className="btn btn-danger btn-icon btn-sm" onClick={() => handleDelete(p.id)}><Trash2 size={13} /></button>
+                <div className="list-row-right">
+                  <span className="tag tag-blue mono">{p.ac ?? '—'} AC</span>
+                  <span className="tag tag-green mono">{p.hp ?? '—'} HP</span>
+                  <svg style={{ width: 14, height: 14, color: 'var(--text3)', transform: expanded === p.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                    strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
                 </div>
               </div>
 
-              <div className="stat-row">
-                <div className="stat-chip">
-                  <span className="stat-chip-label">HP</span>
-                  <span className="stat-chip-value">{p.hp}</span>
-                </div>
-                <div className="stat-chip">
-                  <span className="stat-chip-label">AC</span>
-                  <span className="stat-chip-value">{p.ac}</span>
-                </div>
-                <div className="stat-chip">
-                  <span className="stat-chip-label">Init</span>
-                  <span className="stat-chip-value">{modStr(p.initiativeMod)}</span>
-                </div>
-                {Object.entries(p.abilities || {}).slice(0,3).map(([k,v]) => (
-                  <div key={k} className="stat-chip">
-                    <span className="stat-chip-label">{k}</span>
-                    <span className="stat-chip-value">{v}</span>
-                  </div>
-                ))}
-              </div>
+              {expanded === p.id && (
+                <div style={{ padding: '0 14px 14px', borderBottom: '1px solid var(--border)' }}>
+                  {/* Ability scores */}
+                  {p.abilities && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Ability Scores</div>
+                      <div className="ability-grid">
+                        {['str','dex','con','int','wis','cha'].map(ab => {
+                          const score = p.abilities?.[ab] ?? 10;
+                          const mod = Math.floor((score - 10) / 2);
+                          return (
+                            <div className="ability-cell" key={ab}>
+                              <span className="ability-name">{ab.toUpperCase()}</span>
+                              <span className="ability-score">{score}</span>
+                              <span className="ability-mod">{mod >= 0 ? `+${mod}` : mod}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
 
-              {Object.keys(p.spellSlots || {}).length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  <div className="section-label">Spell Slots</div>
-                  <SpellSlots slots={p.spellSlots} readOnly />
+                  {/* Spell slots */}
+                  {p.spellSlots && Object.values(p.spellSlots).some(v => v > 0) && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Spell Slots</div>
+                      <div className="spell-slots-grid">
+                        {Object.entries(p.spellSlots).map(([lvl, count]) =>
+                          count > 0 ? (
+                            <div className="slot-level" key={lvl}>
+                              <span className="slot-level-label">{lvl}</span>
+                              <div className="slot-pips">
+                                {Array.from({ length: count }).map((_, i) => (
+                                  <div className="slot-pip" key={i} />
+                                ))}
+                              </div>
+                            </div>
+                          ) : null
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Extra stats */}
+                  {(p.speed || p.passivePerception || p.profBonus) && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Stats</div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {p.speed && <span className="tag tag-gray">Speed: {p.speed} ft</span>}
+                        {p.passivePerception && <span className="tag tag-gray">Passive Perc: {p.passivePerception}</span>}
+                        {p.profBonus && <span className="tag tag-gray">Prof: +{p.profBonus}</span>}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Notes */}
+                  {p.notes && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 12 }}>Notes</div>
+                      <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>{p.notes}</p>
+                    </>
+                  )}
+
+                  <div className="gap-row" style={{ marginTop: 14 }}>
+                    <button className="btn btn-ghost" onClick={() => setEditing(p)}>Edit</button>
+                    <button className="btn btn-icon danger" onClick={() => deletePlayer(p.id)}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14H6L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                        <path d="M9 6V4h6v2" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -110,15 +146,13 @@ export default function PlayerRoster({ players, setPlayers }) {
         </div>
       )}
 
-      {showForm && (
-        <Modal
-          title={editing ? `Edit — ${editing.name}` : 'New Character'}
-          onClose={() => { setShowForm(false); setEditing(null) }}
-          wide
-        >
-          <PlayerForm initial={editing || {}} onSave={handleSave} />
-        </Modal>
+      {editing !== null && (
+        <PlayerForm
+          initial={editing === 'new' ? null : editing}
+          onSave={savePlayer}
+          onClose={() => setEditing(null)}
+        />
       )}
-    </div>
-  )
+    </>
+  );
 }
