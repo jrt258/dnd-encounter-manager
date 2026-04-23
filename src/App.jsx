@@ -61,7 +61,7 @@ const NAV_ITEMS = [
 export default function App() {
   const [tab, setTab] = useState('monsters');
 
-  // Monsters: defaults merged with user-created
+  // Monsters: defaults merged with user-created. Both views share the same state.
   const [userMonsters, setUserMonsters] = useLocalStorage('dnd_monsters', []);
   const monsters = useMemo(() => {
     const userIds = new Set(userMonsters.map(m => m.id));
@@ -70,14 +70,14 @@ export default function App() {
   }, [userMonsters]);
   const setMonsters = setUserMonsters;
 
-  // Players
+  // Players: shared between Player Roster and Encounter Builder
   const [players, setPlayers] = useLocalStorage('dnd_players', []);
 
-  // Encounters: array of { id, name, entries[] }
+  // Encounters
   const [encounters, setEncounters]               = useLocalStorage('dnd_encounters', []);
   const [activeEncounterId, setActiveEncounterId] = useLocalStorage('dnd_active_encounter', null);
 
-  // Lifted editing state for header buttons
+  // Lifted editing state for page header buttons
   const [monsterEditing, setMonsterEditing] = useState(null);
   const [playerEditing, setPlayerEditing]   = useState(null);
 
@@ -88,9 +88,7 @@ export default function App() {
       {/* ── Sidebar ── */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="app-title">
-            D<span className="app-title-accent">&amp;</span>D
-          </div>
+          <div className="app-title">D<span className="app-title-accent">&amp;</span>D</div>
           <div className="app-subtitle">Encounter Manager</div>
         </div>
 
@@ -152,18 +150,17 @@ export default function App() {
           {tab === 'encounter' && (
             <EncounterBuilder
               monsters={monsters}
+              setMonsters={setMonsters}
               players={players}
+              setPlayers={setPlayers}
               encounters={encounters}
               setEncounters={setEncounters}
               activeEncounterId={activeEncounterId}
               setActiveEncounterId={setActiveEncounterId}
-              onNavigate={setTab}
             />
           )}
           {tab === 'combat' && (
-            <CombatRunner
-              encounters={encounters}
-            />
+            <CombatRunner encounters={encounters} />
           )}
         </div>
       </div>

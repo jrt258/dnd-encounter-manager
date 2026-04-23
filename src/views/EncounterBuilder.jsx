@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react';
 import Modal from '../components/Modal';
+import MonsterForm from '../components/MonsterForm';
+import PlayerForm from '../components/PlayerForm';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,20 +69,17 @@ const IconDuplicate = () => (
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
   </svg>
 );
-
 const IconDelete = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6" />
     <path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
   </svg>
 );
-
 const IconEdit = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
   </svg>
 );
-
 const IconX = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -106,50 +105,39 @@ function FilterPill({ label, active, onClick }) {
 
 // ─── Monster Card Modal ───────────────────────────────────────────────────────
 
-function MonsterCard({ monster, onClose, onAdd }) {
+function MonsterCard({ monster, onClose, onAdd, onEdit }) {
   const m = monster;
   const ABILITY_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
 
   return (
     <Modal title={m.name} onClose={onClose} wide>
-      {/* Header strip */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
         <span className="tag tag-gray">{m.type || 'Monster'}</span>
-        {m.cr !== undefined && m.cr !== '' && (
-          <span className="tag tag-amber">CR {crLabel(m.cr)}</span>
-        )}
+        {m.cr !== undefined && m.cr !== '' && <span className="tag tag-amber">CR {crLabel(m.cr)}</span>}
         {m.size && <span className="tag tag-gray">{m.size}</span>}
         {m.isDefault && <span className="tag tag-blue" style={{ fontSize: 9 }}>SRD</span>}
       </div>
 
-      {/* Core stats row */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20,
-        background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: 12,
-      }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20,
+        background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: 12 }}>
         {[
-          { label: 'Hit Points', value: m.hp ?? '—', sub: m.hpFormula ? `(${m.hpFormula})` : null },
+          { label: 'Hit Points',  value: m.hp ?? '—', sub: m.hpFormula ? `(${m.hpFormula})` : null },
           { label: 'Armor Class', value: m.ac ?? '—' },
-          { label: 'Speed', value: m.speed ? `${m.speed} ft` : '—' },
+          { label: 'Speed',       value: m.speed ? `${m.speed} ft` : '—' },
         ].map(s => (
           <div key={s.label} style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', marginBottom: 2 }}>
-              {s.label}
-            </div>
-            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 500, color: 'var(--text)', lineHeight: 1 }}>
-              {s.value}
-            </div>
+            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', marginBottom: 2 }}>{s.label}</div>
+            <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 500, color: 'var(--text)', lineHeight: 1 }}>{s.value}</div>
             {s.sub && <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>{s.sub}</div>}
           </div>
         ))}
       </div>
 
-      {/* Ability scores */}
       {m.abilities && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Ability Scores</div>
           <div className="ability-grid">
-            {['str', 'dex', 'con', 'int', 'wis', 'cha'].map(ab => {
+            {['str','dex','con','int','wis','cha'].map(ab => {
               const score = m.abilities[ab] ?? 10;
               const mod   = Math.floor((score - 10) / 2);
               return (
@@ -164,16 +152,12 @@ function MonsterCard({ monster, onClose, onAdd }) {
         </div>
       )}
 
-      {/* Actions / Attacks */}
       {m.attacks?.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Actions</div>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
             {m.attacks.map((atk, i) => (
-              <div key={i} style={{
-                padding: '10px 14px',
-                borderBottom: i < m.attacks.length - 1 ? '1px solid var(--border)' : 'none',
-              }}>
+              <div key={i} style={{ padding: '10px 14px', borderBottom: i < m.attacks.length - 1 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: atk.notes ? 4 : 0 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{atk.name}</span>
                   {atk.hitBonus !== undefined && (
@@ -187,16 +171,13 @@ function MonsterCard({ monster, onClose, onAdd }) {
                     </span>
                   )}
                 </div>
-                {atk.notes && (
-                  <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{atk.notes}</div>
-                )}
+                {atk.notes && <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{atk.notes}</div>}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Spell slots */}
       {m.spellSlots && Object.values(m.spellSlots).some(v => v > 0) && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Spell Slots</div>
@@ -206,9 +187,7 @@ function MonsterCard({ monster, onClose, onAdd }) {
                 <div className="slot-level" key={lvl}>
                   <span className="slot-level-label">Lvl {lvl}</span>
                   <div className="slot-pips">
-                    {Array.from({ length: count }).map((_, i) => (
-                      <div className="slot-pip" key={i} />
-                    ))}
+                    {Array.from({ length: count }).map((_, i) => <div className="slot-pip" key={i} />)}
                   </div>
                 </div>
               ) : null
@@ -217,51 +196,36 @@ function MonsterCard({ monster, onClose, onAdd }) {
         </div>
       )}
 
-      {/* Spells */}
       {m.spells?.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Spells</div>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-            {[...m.spells]
-              .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name))
-              .map((sp, i) => {
-                let defLine = '';
-                if (sp.defenseType === 'save') {
-                  defLine = `${sp.saveAbility?.toUpperCase()} Save DC ${sp.saveDC}`;
-                  if (sp.onSave) defLine += ` · ${sp.onSave} on save`;
-                } else if (sp.defenseType === 'attack') {
-                  defLine = `${modStr(sp.attackBonus)} spell attack`;
-                }
-                return (
-                  <div key={sp.id ?? i} style={{
-                    padding: '10px 14px',
-                    borderBottom: i < m.spells.length - 1 ? '1px solid var(--border)' : 'none',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name}</span>
-                      <span className="tag tag-purple" style={{ fontSize: 9 }}>
-                        {sp.level === 0 ? 'Cantrip' : `Lvl ${sp.level}`}
-                      </span>
-                      {sp.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
-                      {sp.ritual && <span className="tag tag-blue" style={{ fontSize: 9 }}>ℛ Ritual</span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', display: 'flex', flexWrap: 'wrap', gap: '0 10px', marginBottom: sp.description ? 4 : 0 }}>
-                      {sp.castingTime && <span>{sp.castingTime}</span>}
-                      {sp.range && <span>{sp.range}</span>}
-                      {sp.effect && <span>{sp.effect}</span>}
-                      {defLine && <span style={{ color: 'var(--accent-text)' }}>{defLine}</span>}
-                    </div>
-                    {sp.description && (
-                      <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{sp.description}</div>
-                    )}
+            {[...m.spells].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)).map((sp, i) => {
+              let defLine = '';
+              if (sp.defenseType === 'save') defLine = `${sp.saveAbility?.toUpperCase()} Save DC ${sp.saveDC}${sp.onSave ? ` · ${sp.onSave} on save` : ''}`;
+              else if (sp.defenseType === 'attack') defLine = `${modStr(sp.attackBonus)} spell attack`;
+              return (
+                <div key={sp.id ?? i} style={{ padding: '10px 14px', borderBottom: i < m.spells.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name}</span>
+                    <span className="tag tag-purple" style={{ fontSize: 9 }}>{sp.level === 0 ? 'Cantrip' : `Lvl ${sp.level}`}</span>
+                    {sp.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
+                    {sp.ritual && <span className="tag tag-blue" style={{ fontSize: 9 }}>ℛ Ritual</span>}
                   </div>
-                );
-              })}
+                  <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', display: 'flex', flexWrap: 'wrap', gap: '0 10px', marginBottom: sp.description ? 4 : 0 }}>
+                    {sp.castingTime && <span>{sp.castingTime}</span>}
+                    {sp.range && <span>{sp.range}</span>}
+                    {sp.effect && <span>{sp.effect}</span>}
+                    {defLine && <span style={{ color: 'var(--accent-text)' }}>{defLine}</span>}
+                  </div>
+                  {sp.description && <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{sp.description}</div>}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* Notes */}
       {m.notes && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Notes & Traits</div>
@@ -269,13 +233,15 @@ function MonsterCard({ monster, onClose, onAdd }) {
         </div>
       )}
 
-      {/* Footer action */}
-      {onAdd && (
-        <div style={{ paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
+      <div style={{ paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        {onEdit && (
+          <button className="btn btn-ghost" onClick={() => { onClose(); onEdit(m); }}>Edit Monster</button>
+        )}
+        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+        {onAdd && (
           <button className="btn btn-accent" onClick={() => { onAdd(); onClose(); }}>+ Add to Encounter</button>
-        </div>
-      )}
+        )}
+      </div>
     </Modal>
   );
 }
@@ -296,36 +262,25 @@ function EncounterItem({ enc, active, onSelect, onRename, onDuplicate, onDelete 
   const monsterCount = enc.entries.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0);
   const playerCount  = enc.entries.filter(e => e.type === 'player').length;
   const hasContent   = monsterCount > 0 || playerCount > 0;
-
-  // Build summary string — only show if there's something
   const parts = [];
   if (monsterCount > 0) parts.push(`${monsterCount} monster${monsterCount !== 1 ? 's' : ''}`);
   if (playerCount > 0)  parts.push(`${playerCount} player${playerCount !== 1 ? 's' : ''}`);
-  const summary = parts.join(' · ');
 
   return (
     <div
       onClick={() => !renaming && onSelect(enc.id)}
       style={{
-        padding: '12px 14px',
-        borderRadius: 'var(--radius-sm)',
+        padding: '12px 14px', borderRadius: 'var(--radius-sm)',
         background: active ? 'var(--accent-bg)' : 'var(--surface2)',
         border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-        cursor: 'pointer',
-        transition: 'all 0.12s',
-        marginBottom: 6,
+        cursor: 'pointer', transition: 'all 0.12s', marginBottom: 6,
       }}
     >
       {renaming ? (
-        <input
-          autoFocus
-          value={draft}
+        <input autoFocus value={draft}
           onChange={e => setDraft(e.target.value)}
           onBlur={commitRename}
-          onKeyDown={e => {
-            if (e.key === 'Enter') commitRename();
-            if (e.key === 'Escape') { setDraft(enc.name); setRenaming(false); }
-          }}
+          onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setDraft(enc.name); setRenaming(false); } }}
           onClick={e => e.stopPropagation()}
           style={{ width: '100%', fontSize: 13, fontWeight: 600, padding: '2px 4px', marginBottom: 6 }}
         />
@@ -334,38 +289,18 @@ function EncounterItem({ enc, active, onSelect, onRename, onDuplicate, onDelete 
           {enc.name}
         </div>
       )}
-
       {hasContent && (
         <div style={{ fontSize: 12, color: active ? 'var(--accent-text)' : 'var(--text2)', marginBottom: 8 }}>
-          {summary}
+          {parts.join(' · ')}
         </div>
       )}
-
       <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-        <button
-          className="btn-icon"
-          title="Rename"
-          style={{ padding: 5 }}
-          onClick={() => { setDraft(enc.name); setRenaming(true); }}
-        >
-          <IconEdit />
-        </button>
-        <button
-          className="btn-icon"
-          title="Duplicate"
-          style={{ padding: 5 }}
-          onClick={() => onDuplicate(enc.id)}
-        >
-          <IconDuplicate />
-        </button>
-        <button
-          className="btn-icon danger"
-          title="Delete"
-          style={{ padding: 5 }}
-          onClick={() => onDelete(enc.id)}
-        >
-          <IconDelete />
-        </button>
+        <button className="btn-icon" title="Rename" style={{ padding: 5 }}
+          onClick={() => { setDraft(enc.name); setRenaming(true); }}><IconEdit /></button>
+        <button className="btn-icon" title="Duplicate" style={{ padding: 5 }}
+          onClick={() => onDuplicate(enc.id)}><IconDuplicate /></button>
+        <button className="btn-icon danger" title="Delete" style={{ padding: 5 }}
+          onClick={() => onDelete(enc.id)}><IconDelete /></button>
       </div>
     </div>
   );
@@ -374,20 +309,53 @@ function EncounterItem({ enc, active, onSelect, onRename, onDuplicate, onDelete 
 // ─── Main EncounterBuilder ─────────────────────────────────────────────────────
 
 export default function EncounterBuilder({
-  monsters, players, encounters, setEncounters,
+  monsters, setMonsters,
+  players,  setPlayers,
+  encounters, setEncounters,
   activeEncounterId, setActiveEncounterId,
-  onNavigate,
 }) {
   const [search, setSearch]         = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterCr, setFilterCr]     = useState('all');
   const [previewMonster, setPreviewMonster] = useState(null);
 
-  // Derive unique types from library
+  // Monster create/edit modal state
+  const [monsterEditing, setMonsterEditing] = useState(null); // null | 'new' | monster object
+
+  // Player create/edit modal state
+  const [playerEditing, setPlayerEditing] = useState(null); // null | 'new' | player object
+
   const allTypes = useMemo(() => {
     const types = [...new Set(monsters.map(m => m.type).filter(Boolean))].sort();
     return ['all', ...types];
   }, [monsters]);
+
+  // ── Monster CRUD (writes to shared library) ───────────────────────────────
+
+  function saveMonster(data) {
+    if (monsterEditing === 'new') {
+      const newMonster = { ...data, id: Date.now().toString(), maxHp: data.hp };
+      setMonsters(prev => [...prev, newMonster]);
+    } else if (monsterEditing?.isDefault) {
+      // Clone of a default — save as user copy
+      setMonsters(prev => [...prev, { ...data, id: Date.now().toString(), isDefault: false, maxHp: data.hp }]);
+    } else {
+      setMonsters(prev => prev.map(m => m.id === monsterEditing.id ? { ...monsterEditing, ...data, maxHp: data.hp } : m));
+    }
+    setMonsterEditing(null);
+  }
+
+  // ── Player CRUD (writes to shared library) ────────────────────────────────
+
+  function savePlayer(data) {
+    if (playerEditing === 'new') {
+      const newPlayer = { ...data, id: Date.now().toString(), maxHp: data.hp };
+      setPlayers(prev => [...prev, newPlayer]);
+    } else {
+      setPlayers(prev => prev.map(p => p.id === playerEditing.id ? { ...playerEditing, ...data, maxHp: data.hp } : p));
+    }
+    setPlayerEditing(null);
+  }
 
   // ── Encounter CRUD ────────────────────────────────────────────────────────
 
@@ -404,12 +372,7 @@ export default function EncounterBuilder({
   function duplicateEncounter(id) {
     const src = encounters.find(e => e.id === id);
     if (!src) return;
-    const copy = {
-      ...src,
-      id: uid(),
-      name: `${src.name} (copy)`,
-      entries: src.entries.map(entry => ({ ...entry, id: uid() })),
-    };
+    const copy = { ...src, id: uid(), name: `${src.name} (copy)`, entries: src.entries.map(entry => ({ ...entry, id: uid() })) };
     setEncounters(prev => [...prev, copy]);
     setActiveEncounterId(copy.id);
   }
@@ -418,9 +381,7 @@ export default function EncounterBuilder({
     if (!confirm('Delete this encounter?')) return;
     setEncounters(prev => {
       const next = prev.filter(e => e.id !== id);
-      if (activeEncounterId === id) {
-        setActiveEncounterId(next.length > 0 ? next[next.length - 1].id : null);
-      }
+      if (activeEncounterId === id) setActiveEncounterId(next.length > 0 ? next[next.length - 1].id : null);
       return next;
     });
   }
@@ -438,9 +399,7 @@ export default function EncounterBuilder({
   function addMonster(monster) {
     updateEntries(entries => {
       const existing = entries.find(e => e.sourceId === monster.id && e.type === 'monster');
-      if (existing) {
-        return entries.map(e => e.id === existing.id ? { ...e, count: (e.count || 1) + 1 } : e);
-      }
+      if (existing) return entries.map(e => e.id === existing.id ? { ...e, count: (e.count || 1) + 1 } : e);
       return [...entries, { id: uid(), sourceId: monster.id, type: 'monster', name: monster.name, count: 1, monster }];
     });
   }
@@ -488,13 +447,42 @@ export default function EncounterBuilder({
 
   return (
     <>
-      {/* Monster card preview modal */}
+      {/* Monster card preview */}
       {previewMonster && (
         <MonsterCard
           monster={previewMonster}
           onClose={() => setPreviewMonster(null)}
           onAdd={activeEncounter ? () => addMonster(previewMonster) : null}
+          onEdit={m => setMonsterEditing(m)}
         />
+      )}
+
+      {/* Monster create/edit modal */}
+      {monsterEditing !== null && (
+        <Modal
+          title={monsterEditing === 'new' ? 'New Monster' : `Edit ${monsterEditing?.name ?? 'Monster'}`}
+          onClose={() => setMonsterEditing(null)}
+        >
+          <MonsterForm
+            initial={monsterEditing === 'new' ? null : monsterEditing}
+            onSave={saveMonster}
+            onClose={() => setMonsterEditing(null)}
+          />
+        </Modal>
+      )}
+
+      {/* Player create/edit modal */}
+      {playerEditing !== null && (
+        <Modal
+          title={playerEditing === 'new' ? 'New Character' : `Edit ${playerEditing?.name ?? 'Character'}`}
+          onClose={() => setPlayerEditing(null)}
+        >
+          <PlayerForm
+            initial={playerEditing === 'new' ? null : playerEditing}
+            onSave={savePlayer}
+            onClose={() => setPlayerEditing(null)}
+          />
+        </Modal>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 300px', gap: 16, alignItems: 'start' }}>
@@ -505,7 +493,6 @@ export default function EncounterBuilder({
             <span className="section-heading" style={{ margin: 0 }}>Encounters</span>
             <button className="btn btn-accent btn-sm" onClick={createEncounter}>+ New</button>
           </div>
-
           {encounters.length === 0 ? (
             <div style={{ fontSize: 12, color: 'var(--text3)', padding: '12px 0' }}>
               No encounters yet. Click + New to create one.
@@ -513,13 +500,9 @@ export default function EncounterBuilder({
           ) : (
             encounters.map(enc => (
               <EncounterItem
-                key={enc.id}
-                enc={enc}
-                active={enc.id === activeEncounterId}
-                onSelect={setActiveEncounterId}
-                onRename={renameEncounter}
-                onDuplicate={duplicateEncounter}
-                onDelete={deleteEncounter}
+                key={enc.id} enc={enc} active={enc.id === activeEncounterId}
+                onSelect={setActiveEncounterId} onRename={renameEncounter}
+                onDuplicate={duplicateEncounter} onDelete={deleteEncounter}
               />
             ))
           )}
@@ -536,18 +519,15 @@ export default function EncounterBuilder({
             </div>
           ) : (
             <>
-              {/* Players section */}
-              <div className="section-heading" style={{ marginTop: 0 }}>Party Members</div>
+              {/* Players */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span className="section-heading" style={{ margin: 0 }}>Party Members</span>
+                <button className="btn btn-ghost btn-sm" onClick={() => setPlayerEditing('new')}>+ New Player</button>
+              </div>
               {players.length === 0 ? (
                 <div className="card" style={{ marginBottom: 16 }}>
-                  <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ padding: '14px 16px' }}>
                     <span style={{ fontSize: 13, color: 'var(--text3)' }}>No players in your roster yet.</span>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => onNavigate?.('players')}
-                    >
-                      Go to Player Roster →
-                    </button>
                   </div>
                 </div>
               ) : (
@@ -563,6 +543,13 @@ export default function EncounterBuilder({
                             {[p.class, p.level ? `Level ${p.level}` : null].filter(Boolean).join(' · ')}
                           </div>
                         </div>
+                        <button className="btn-icon" title="Edit player"
+                          onClick={() => setPlayerEditing(p)}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </button>
                         <button
                           className="btn btn-ghost btn-sm"
                           style={added ? { color: 'var(--text3)', cursor: 'default' } : {}}
@@ -574,125 +561,76 @@ export default function EncounterBuilder({
                       </div>
                     );
                   })}
-                  <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => onNavigate?.('players')}
-                    >
-                      + Create New Player →
-                    </button>
-                  </div>
                 </div>
               )}
 
-              {/* Monster library */}
-              <div className="section-heading" style={{ marginTop: 0 }}>Monster Library</div>
-              {monsters.length === 0 ? (
-                <div className="card">
-                  <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <span style={{ fontSize: 13, color: 'var(--text3)' }}>No monsters in your library yet.</span>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => onNavigate?.('monsters')}
-                    >
-                      Go to Monster Library →
+              {/* Monsters */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span className="section-heading" style={{ margin: 0 }}>Monster Library</span>
+                <button className="btn btn-ghost btn-sm" onClick={() => setMonsterEditing('new')}>+ New Monster</button>
+              </div>
+
+              {/* Search + filters */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                  <div className="search-bar" style={{ flex: 1 }}>
+                    <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                    </svg>
+                    <input type="text" placeholder="Search monsters…" value={search} onChange={e => setSearch(e.target.value)} />
+                  </div>
+                  {hasActiveFilters && (
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent)', flexShrink: 0 }}
+                      onClick={() => { setSearch(''); setFilterType('all'); setFilterCr('all'); }}>
+                      Clear
                     </button>
-                  </div>
+                  )}
                 </div>
-              ) : (
-                <>
-                  {/* Search + filter controls */}
-                  <div style={{ marginBottom: 10 }}>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                      <div className="search-bar" style={{ flex: 1 }}>
-                        <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-                        </svg>
-                        <input
-                          type="text"
-                          placeholder="Search monsters…"
-                          value={search}
-                          onChange={e => setSearch(e.target.value)}
-                        />
-                      </div>
-                      {hasActiveFilters && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          style={{ color: 'var(--accent)', flexShrink: 0 }}
-                          onClick={() => { setSearch(''); setFilterType('all'); setFilterCr('all'); }}
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+                  {CR_BRACKETS.map(b => (
+                    <FilterPill key={b.value} label={b.label} active={filterCr === b.value}
+                      onClick={() => setFilterCr(filterCr === b.value ? 'all' : b.value)} />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                  {allTypes.map(t => (
+                    <FilterPill key={t} label={t === 'all' ? 'All Types' : t} active={filterType === t}
+                      onClick={() => setFilterType(filterType === t ? 'all' : t)} />
+                  ))}
+                </div>
+              </div>
 
-                    {/* CR pills */}
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
-                      {CR_BRACKETS.map(b => (
-                        <FilterPill
-                          key={b.value}
-                          label={b.label}
-                          active={filterCr === b.value}
-                          onClick={() => setFilterCr(filterCr === b.value ? 'all' : b.value)}
-                        />
-                      ))}
-                    </div>
-
-                    {/* Type pills */}
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                      {allTypes.map(t => (
-                        <FilterPill
-                          key={t}
-                          label={t === 'all' ? 'All Types' : t}
-                          active={filterType === t}
-                          onClick={() => setFilterType(filterType === t ? 'all' : t)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="card">
-                    {filteredMonsters.length === 0 ? (
-                      <div className="empty-state" style={{ padding: 20 }}>No monsters match your filters.</div>
-                    ) : (
-                      filteredMonsters.map(m => (
-                        <div
-                          className="list-row"
-                          key={m.id}
-                          style={{ cursor: 'pointer' }}
-                          onClick={() => setPreviewMonster(m)}
-                        >
-                          <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
-                          <div className="list-row-main">
-                            <div className="list-row-title">{m.name}</div>
-                            <div className="list-row-sub">
-                              {m.type || 'Monster'}
-                              {m.cr !== undefined && m.cr !== '' ? ` · CR ${crLabel(m.cr)}` : ''}
-                              {` · ${m.hp ?? '—'} HP · ${m.ac ?? '—'} AC`}
-                            </div>
-                          </div>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={e => { e.stopPropagation(); addMonster(m); }}
-                          >
-                            + Add
-                          </button>
+              <div className="card">
+                {filteredMonsters.length === 0 ? (
+                  <div className="empty-state" style={{ padding: 20 }}>No monsters match your filters.</div>
+                ) : (
+                  filteredMonsters.map(m => (
+                    <div className="list-row" key={m.id} style={{ cursor: 'pointer' }}
+                      onClick={() => setPreviewMonster(m)}>
+                      <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                      <div className="list-row-main">
+                        <div className="list-row-title">{m.name}</div>
+                        <div className="list-row-sub">
+                          {m.type || 'Monster'}
+                          {m.cr !== undefined && m.cr !== '' ? ` · CR ${crLabel(m.cr)}` : ''}
+                          {` · ${m.hp ?? '—'} HP · ${m.ac ?? '—'} AC`}
                         </div>
-                      ))
-                    )}
-                    {/* Footer: go create a monster */}
-                    <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => onNavigate?.('monsters')}
-                      >
-                        + Create New Monster →
+                      </div>
+                      <button className="btn-icon" title="Edit monster"
+                        onClick={e => { e.stopPropagation(); setMonsterEditing(m); }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                      <button className="btn btn-ghost btn-sm"
+                        onClick={e => { e.stopPropagation(); addMonster(m); }}>
+                        + Add
                       </button>
                     </div>
-                  </div>
-                </>
-              )}
+                  ))
+                )}
+              </div>
             </>
           )}
         </div>
@@ -709,7 +647,6 @@ export default function EncounterBuilder({
                   </span>
                 )}
               </div>
-
               {entries.length === 0 ? (
                 <div className="card">
                   <div className="empty-state" style={{ padding: 28 }}>
@@ -726,20 +663,14 @@ export default function EncounterBuilder({
                         <div className="list-row-title">{e.name}</div>
                         <div className="list-row-sub">Player</div>
                       </div>
-                      <button className="btn-icon danger" onClick={() => removeEntry(e.id)} title="Remove">
-                        <IconX />
-                      </button>
+                      <button className="btn-icon danger" onClick={() => removeEntry(e.id)} title="Remove"><IconX /></button>
                     </div>
                   ))}
-
                   {monsterEntries.map(e => (
                     <div className="list-row" key={e.id}>
                       <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
-                      <div
-                        className="list-row-main"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => setPreviewMonster(e.monster)}
-                      >
+                      <div className="list-row-main" style={{ cursor: 'pointer' }}
+                        onClick={() => setPreviewMonster(e.monster)}>
                         <div className="list-row-title">{e.name}</div>
                         <div className="list-row-sub">
                           CR {crLabel(e.monster?.cr)} · {e.monster?.hp ?? '—'} HP · {e.monster?.ac ?? '—'} AC
@@ -752,12 +683,9 @@ export default function EncounterBuilder({
                           <button className="stepper-btn" onClick={() => changeCount(e.id, +1)}>+</button>
                         </div>
                       </div>
-                      <button className="btn-icon danger" onClick={() => removeEntry(e.id)} title="Remove">
-                        <IconX />
-                      </button>
+                      <button className="btn-icon danger" onClick={() => removeEntry(e.id)} title="Remove"><IconX /></button>
                     </div>
                   ))}
-
                   <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 12, color: 'var(--text3)' }}>
                       {entries.length} combatant{entries.length !== 1 ? 's' : ''}

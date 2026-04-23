@@ -59,7 +59,13 @@ function dexMod(abilities) {
   return abilities ? Math.floor((abilities.dex - 10) / 2) : 0;
 }
 
-// Build flat combatant list from encounter entries (no initiative yet)
+// Clamp initiative input to minimum 1
+function clampInit(val) {
+  const n = parseInt(val);
+  if (isNaN(n)) return '';
+  return String(Math.max(1, n));
+}
+
 function buildCombatants(entries) {
   const result = [];
   for (const entry of entries) {
@@ -88,14 +94,13 @@ function buildCombatants(entries) {
     } else if (entry.type === 'monster') {
       const m = entry.monster;
       const count = entry.count || 1;
-      // For shared initiative: group key = sourceId; representative = highest dex in group (all same here)
       const groupInitMod = dexMod(m.abilities) + (m.initiativeMod ?? 0);
       for (let i = 0; i < count; i++) {
         const maxHp = m.hpFormula ? rollDice(m.hpFormula) : (m.hp ?? 10);
         result.push({
           id: `${entry.id}-${i}`,
           sourceId: entry.sourceId,
-          groupKey: entry.sourceId,   // used for shared initiative grouping
+          groupKey: entry.sourceId,
           type: 'monster',
           name: count > 1 ? `${m.name} ${i + 1}` : m.name,
           baseName: m.name,
@@ -185,12 +190,15 @@ function QuickHP({ label, color, sign, c, onUpdate }) {
   );
 }
 
+// ─── Expanded detail panel — reroll removed, initiative shown as read-only ───
+
 function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
   const currentHp = c.maxHp - c.damage;
   return (
     <div className="combatant-expand">
       <div className="expand-grid">
         <div>
+          {/* HP */}
           <div className="expand-section">
             <div className="expand-section-title">Hit Points</div>
             <div className="hp-edit-row">
@@ -219,21 +227,22 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
             </div>
           </div>
 
+          {/* Initiative — read-only display, no reroll */}
           <div className="expand-section" style={{ marginTop: 14 }}>
             <div className="expand-section-title">Initiative</div>
-            <div className="gap-row">
-              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 500 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 22, fontWeight: 500, color: 'var(--text)' }}>
                 {c.initiative ?? '—'}
               </span>
-              <button className="btn btn-ghost btn-sm"
-                onClick={() => onUpdate(c.id, { initiative: rollD20() + c.initMod })}>
-                Reroll d20
-              </button>
-              <input type="number" style={{ width: 64, padding: '4px 8px', fontSize: 13 }} placeholder="Set"
-                onBlur={e => { if (e.target.value !== '') onUpdate(c.id, { initiative: parseInt(e.target.value) }); e.target.value = ''; }} />
+              {c.initMod !== 0 && (
+                <span style={{ fontSize: 12, color: 'var(--text3)' }}>
+                  (mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod})
+                </span>
+              )}
             </div>
           </div>
 
+          {/* Ability scores */}
           {c.abilities && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Ability Scores</div>
@@ -305,6 +314,26 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
   );
 }
 
+// ─── Initiative input field (min 1) ──────────────────────────────────────────
+
+function InitInput({ value, onChange, style = {} }) {
+  return (
+    <input
+      type="number"
+      min={1}
+      placeholder="—"
+      value={value}
+      onChange={e => onChange(clampInit(e.target.value))}
+      onBlur={e => { if (e.target.value !== '' && parseInt(e.target.value) < 1) onChange('1'); }}
+      style={{
+        width: 72, textAlign: 'center',
+        fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500,
+        ...style,
+      }}
+    />
+  );
+}
+
 // ─── Screen 1: Encounter Select ───────────────────────────────────────────────
 
 function EncounterSelectScreen({ encounters, onSelect }) {
@@ -324,25 +353,23 @@ function EncounterSelectScreen({ encounters, onSelect }) {
             const monsterCount = enc.entries.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0);
             const playerCount  = enc.entries.filter(e => e.type === 'player').length;
             const isEmpty = enc.entries.length === 0;
+            const parts = [];
+            if (monsterCount > 0) parts.push(`${monsterCount} monster${monsterCount !== 1 ? 's' : ''}`);
+            if (playerCount > 0)  parts.push(`${playerCount} player${playerCount !== 1 ? 's' : ''}`);
             return (
-              <div key={enc.id} className="list-row" style={{ cursor: isEmpty ? 'default' : 'pointer' }}
+              <div key={enc.id} className="list-row"
+                style={{ cursor: isEmpty ? 'default' : 'pointer' }}
                 onClick={() => !isEmpty && onSelect(enc)}>
                 <div className="list-row-main">
                   <div className="list-row-title" style={{ color: isEmpty ? 'var(--text3)' : 'var(--text)' }}>
                     {enc.name}
                   </div>
-                  <div className="list-row-sub">
-                    {isEmpty
-                      ? 'Empty — add combatants in Encounter Builder'
-                      : [
-                          monsterCount > 0 ? `${monsterCount} monster${monsterCount !== 1 ? 's' : ''}` : null,
-                          playerCount > 0  ? `${playerCount} player${playerCount !== 1 ? 's' : ''}` : null,
-                        ].filter(Boolean).join(' · ')}
-                  </div>
+                  {isEmpty
+                    ? <div className="list-row-sub">Empty — add combatants in Encounter Builder</div>
+                    : parts.length > 0 && <div className="list-row-sub">{parts.join(' · ')}</div>
+                  }
                 </div>
-                {!isEmpty && (
-                  <button className="btn btn-accent btn-sm">Run →</button>
-                )}
+                {!isEmpty && <button className="btn btn-accent btn-sm">Run →</button>}
               </div>
             );
           })}
@@ -355,9 +382,8 @@ function EncounterSelectScreen({ encounters, onSelect }) {
 // ─── Screen 2: Initiative Mode Select ────────────────────────────────────────
 
 function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
-  const [mode, setMode] = useState('individual'); // 'shared' | 'individual'
+  const [mode, setMode] = useState('individual');
 
-  // Get unique monster groups
   const monsterGroups = [...new Map(
     encounter.entries
       .filter(e => e.type === 'monster')
@@ -366,15 +392,9 @@ function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
 
   return (
     <div style={{ maxWidth: 520 }}>
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>
-        ← Back
-      </button>
-      <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-        {encounter.name}
-      </div>
-      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 20 }}>
-        Choose how monster initiative is rolled.
-      </div>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>← Back</button>
+      <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>{encounter.name}</div>
+      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 20 }}>Choose how monster initiative is rolled.</div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
         {[
@@ -386,19 +406,15 @@ function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
           {
             value: 'shared',
             title: 'Shared Initiative',
-            desc: 'All monsters of the same type share one roll (5e group initiative rule). The creature with the highest DEX modifier in the group represents the roll.',
+            desc: 'All monsters of the same type act on the same initiative. One roll per group using that group\'s initiative modifier.',
           },
         ].map(opt => (
-          <div key={opt.value}
-            onClick={() => setMode(opt.value)}
-            style={{
-              padding: '14px 16px',
-              borderRadius: 'var(--radius)',
-              border: `2px solid ${mode === opt.value ? 'var(--accent)' : 'var(--border)'}`,
-              background: mode === opt.value ? 'var(--accent-bg)' : 'var(--surface)',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}>
+          <div key={opt.value} onClick={() => setMode(opt.value)} style={{
+            padding: '14px 16px', borderRadius: 'var(--radius)',
+            border: `2px solid ${mode === opt.value ? 'var(--accent)' : 'var(--border)'}`,
+            background: mode === opt.value ? 'var(--accent-bg)' : 'var(--surface)',
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{
                 width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
@@ -448,55 +464,62 @@ function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
 }
 
 // ─── Screen 3: Initiative Input ───────────────────────────────────────────────
+// Shared mode: one row per monster group, one Roll button, sets all in group.
+// Individual mode: one row per monster, each with their own Roll button.
+// Players: always manual, always min 1.
 
 function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) {
-  // initiatives keyed by combatant id; for shared mode also by groupKey
   const [initiatives, setInitiatives] = useState(() => {
     const init = {};
     combatants.forEach(c => { init[c.id] = ''; });
     return init;
   });
 
-  // For shared mode: which groupKeys have been rolled (one entry per group)
-  const monsterGroups = initiativeMode === 'shared'
-    ? [...new Map(
-        combatants
-          .filter(c => c.type === 'monster')
-          .map(c => [c.groupKey, c])
-      ).values()]
-    : [];
+  // One entry per unique groupKey for shared mode
+  const monsterGroups = [...new Map(
+    combatants.filter(c => c.type === 'monster').map(c => [c.groupKey, c])
+  ).values()];
 
   function setVal(id, val) {
     setInitiatives(prev => ({ ...prev, [id]: val }));
   }
 
-  // Shared roll: roll once for the group's representative, apply to all in group
-  function rollGroup(groupKey) {
-    const rep = combatants.find(c => c.groupKey === groupKey);
-    if (!rep) return;
-    const roll = rollD20() + rep.initMod;
+  function setGroupVal(groupKey, val) {
     setInitiatives(prev => {
       const next = { ...prev };
-      combatants.filter(c => c.groupKey === groupKey).forEach(c => { next[c.id] = String(roll); });
+      combatants.filter(c => c.groupKey === groupKey).forEach(c => { next[c.id] = val; });
       return next;
     });
   }
 
+  // Shared: one roll per group, applied to all members
+  function rollGroup(groupKey) {
+    const rep = combatants.find(c => c.groupKey === groupKey);
+    if (!rep) return;
+    const result = String(Math.max(1, rollD20() + rep.initMod));
+    setGroupVal(groupKey, result);
+  }
+
+  // Individual: roll separately for each monster
+  function rollIndividual(id, initMod) {
+    setVal(id, String(Math.max(1, rollD20() + initMod)));
+  }
+
+  // "Roll All Monsters" — respects the current mode
   function rollAll() {
     setInitiatives(prev => {
       const next = { ...prev };
       if (initiativeMode === 'shared') {
-        // Roll once per group
         const rolled = {};
         combatants.filter(c => c.type === 'monster').forEach(c => {
           if (!rolled[c.groupKey]) {
-            rolled[c.groupKey] = rollD20() + c.initMod;
+            rolled[c.groupKey] = String(Math.max(1, rollD20() + c.initMod));
           }
-          next[c.id] = String(rolled[c.groupKey]);
+          next[c.id] = rolled[c.groupKey];
         });
       } else {
         combatants.filter(c => c.type === 'monster').forEach(c => {
-          next[c.id] = String(rollD20() + c.initMod);
+          next[c.id] = String(Math.max(1, rollD20() + c.initMod));
         });
       }
       return next;
@@ -506,44 +529,34 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
   function handleStart() {
     const withInit = combatants.map(c => ({
       ...c,
-      initiative: parseInt(initiatives[c.id]) || 0,
+      initiative: Math.max(1, parseInt(initiatives[c.id]) || 1),
     })).sort((a, b) => b.initiative - a.initiative || b.initMod - a.initMod);
     onStart(withInit);
   }
 
-  const players   = combatants.filter(c => c.type === 'player');
-  const monsters  = initiativeMode === 'shared' ? monsterGroups : combatants.filter(c => c.type === 'monster');
+  const players = combatants.filter(c => c.type === 'player');
+  const allSet  = combatants.every(c => initiatives[c.id] !== '' && !isNaN(parseInt(initiatives[c.id])));
 
-  // For shared mode, the "representative" combatant stands in for the group
-  function getGroupInitVal(groupKey) {
+  // Helper: get display value for a group (reads from first member)
+  function getGroupVal(groupKey) {
     const member = combatants.find(c => c.groupKey === groupKey);
     return member ? initiatives[member.id] : '';
   }
-  function setGroupInitVal(groupKey, val) {
-    setInitiatives(prev => {
-      const next = { ...prev };
-      combatants.filter(c => c.groupKey === groupKey).forEach(c => { next[c.id] = val; });
-      return next;
-    });
-  }
-
-  const allSet = combatants.every(c => initiatives[c.id] !== '' && !isNaN(parseInt(initiatives[c.id])));
 
   return (
     <div style={{ maxWidth: 560 }}>
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>
-        ← Back
-      </button>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>← Back</button>
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>Set Initiatives</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
-            {initiativeMode === 'shared' ? 'Monsters share initiative by type.' : 'Each combatant rolls individually.'}
+            {initiativeMode === 'shared'
+              ? 'One roll per monster type — all of that type act together.'
+              : 'Each combatant rolls separately.'}
           </div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={rollAll}>
-          🎲 Roll All Monsters
-        </button>
+        <button className="btn btn-ghost btn-sm" onClick={rollAll}>🎲 Roll All Monsters</button>
       </div>
 
       {/* Players */}
@@ -556,15 +569,9 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
                 <div className="combatant-dot dot-player" style={{ flexShrink: 0 }} />
                 <div className="list-row-main">
                   <div className="list-row-title">{c.name}</div>
-                  <div className="list-row-sub">Enter initiative from player</div>
+                  <div className="list-row-sub">Enter initiative from player (min 1)</div>
                 </div>
-                <input
-                  type="number"
-                  placeholder="—"
-                  value={initiatives[c.id]}
-                  onChange={e => setVal(c.id, e.target.value)}
-                  style={{ width: 72, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500 }}
-                />
+                <InitInput value={initiatives[c.id]} onChange={val => setVal(c.id, val)} />
               </div>
             ))}
           </div>
@@ -578,30 +585,24 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
           {initiativeMode === 'shared'
             ? monsterGroups.map(rep => {
                 const count = combatants.filter(c => c.groupKey === rep.groupKey).length;
-                const mod   = rep.initMod;
-                const val   = getGroupInitVal(rep.groupKey);
+                const val   = getGroupVal(rep.groupKey);
                 return (
                   <div className="list-row" key={rep.groupKey}>
                     <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
                     <div className="list-row-main">
                       <div className="list-row-title">{rep.baseName ?? rep.name}</div>
                       <div className="list-row-sub">
-                        ×{count} · Init {mod >= 0 ? `+${mod}` : mod}
+                        ×{count} · Init {rep.initMod >= 0 ? `+${rep.initMod}` : rep.initMod}
+                        {count > 1 && ' · All share this roll'}
                       </div>
                     </div>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ flexShrink: 0 }}
-                      onClick={() => rollGroup(rep.groupKey)}
-                    >
+                    <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
+                      onClick={() => rollGroup(rep.groupKey)}>
                       🎲 Roll
                     </button>
-                    <input
-                      type="number"
-                      placeholder="—"
+                    <InitInput
                       value={val}
-                      onChange={e => setGroupInitVal(rep.groupKey, e.target.value)}
-                      style={{ width: 72, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500 }}
+                      onChange={val => setGroupVal(rep.groupKey, val)}
                     />
                   </div>
                 );
@@ -613,20 +614,11 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
                     <div className="list-row-title">{c.name}</div>
                     <div className="list-row-sub">Init {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}</div>
                   </div>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    style={{ flexShrink: 0 }}
-                    onClick={() => setVal(c.id, String(rollD20() + c.initMod))}
-                  >
+                  <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
+                    onClick={() => rollIndividual(c.id, c.initMod)}>
                     🎲 Roll
                   </button>
-                  <input
-                    type="number"
-                    placeholder="—"
-                    value={initiatives[c.id]}
-                    onChange={e => setVal(c.id, e.target.value)}
-                    style={{ width: 72, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500 }}
-                  />
+                  <InitInput value={initiatives[c.id]} onChange={val => setVal(c.id, val)} />
                 </div>
               ))
           }
@@ -654,8 +646,7 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
 // ─── Main CombatRunner ────────────────────────────────────────────────────────
 
 export default function CombatRunner({ encounters }) {
-  // screen: 'select' | 'mode' | 'initiative' | 'combat'
-  const [screen, setScreen]           = useState('select');
+  const [screen, setScreen]                       = useState('select');
   const [selectedEncounter, setSelectedEncounter] = useState(null);
   const [initiativeMode, setInitiativeMode]       = useState('individual');
   const [pendingCombatants, setPendingCombatants] = useState([]);
@@ -665,17 +656,15 @@ export default function CombatRunner({ encounters }) {
   const [turnIdx, setTurnIdx]       = useState(0);
   const [log, setLog]               = useState([]);
 
-  // Drag state
+  // Drag — only the handle div is draggable; the outer row is NOT
   const dragIdx     = useRef(null);
   const dragOverIdx = useRef(null);
-  const [dragOverId, setDragOverId]   = useState(null);
-  const [draggingId, setDraggingId]   = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const [draggingId, setDraggingId] = useState(null);
 
   const addLog = useCallback((msg, r) => {
     setLog(prev => [{ msg, round: r, id: Date.now() + Math.random() }, ...prev].slice(0, 80));
   }, []);
-
-  // ── Flow handlers ──────────────────────────────────────────────────────────
 
   function handleSelectEncounter(enc) {
     setSelectedEncounter(enc);
@@ -690,9 +679,7 @@ export default function CombatRunner({ encounters }) {
 
   function handleStartCombat(sortedCombatants) {
     setCombatants(sortedCombatants);
-    setRound(1);
-    setTurnIdx(0);
-    setLog([]);
+    setRound(1); setTurnIdx(0); setLog([]);
     addLog('⚔️  Combat started!', 1);
     if (sortedCombatants[0]) addLog(`${sortedCombatants[0].name}'s turn`, 1);
     setScreen('combat');
@@ -703,12 +690,8 @@ export default function CombatRunner({ encounters }) {
     setScreen('select');
     setSelectedEncounter(null);
     setCombatants([]);
-    setRound(1);
-    setTurnIdx(0);
-    setLog([]);
+    setRound(1); setTurnIdx(0); setLog([]);
   }
-
-  // ── Turn management ────────────────────────────────────────────────────────
 
   function nextTurn() {
     setCombatants(prev => {
@@ -757,14 +740,27 @@ export default function CombatRunner({ encounters }) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
   }
 
-  // ── Drag and drop ──────────────────────────────────────────────────────────
+  // ── Drag — only fires from the drag handle div, not the whole row ──────────
 
-  function onDragStart(e, idx) { dragIdx.current = idx; setDraggingId(combatants[idx].id); e.dataTransfer.effectAllowed = 'move'; }
-  function onDragOver(e, idx)  { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; dragOverIdx.current = idx; setDragOverId(combatants[idx].id); }
-  function onDragLeave()       { setDragOverId(null); }
-  function onDragEnd()         { dragIdx.current = null; setDraggingId(null); setDragOverId(null); }
+  function onHandleDragStart(e, idx) {
+    dragIdx.current = idx;
+    setDraggingId(combatants[idx].id);
+    e.dataTransfer.effectAllowed = 'move';
+    // Prevent the event from bubbling to any outer draggable
+    e.stopPropagation();
+  }
 
-  function onDrop(e, idx) {
+  function onRowDragOver(e, idx) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    dragOverIdx.current = idx;
+    setDragOverId(combatants[idx].id);
+  }
+
+  function onRowDragLeave() { setDragOverId(null); }
+  function onDragEnd()      { dragIdx.current = null; setDraggingId(null); setDragOverId(null); }
+
+  function onRowDrop(e, idx) {
     e.preventDefault();
     const from = dragIdx.current;
     if (from === null || from === idx) return;
@@ -780,32 +776,11 @@ export default function CombatRunner({ encounters }) {
     dragIdx.current = null; setDraggingId(null); setDragOverId(null);
   }
 
-  // ── Render screens ─────────────────────────────────────────────────────────
+  // ── Screens ────────────────────────────────────────────────────────────────
 
-  if (screen === 'select') {
-    return <EncounterSelectScreen encounters={encounters} onSelect={handleSelectEncounter} />;
-  }
-
-  if (screen === 'mode') {
-    return (
-      <InitiativeModeScreen
-        encounter={selectedEncounter}
-        onConfirm={handleConfirmMode}
-        onBack={() => setScreen('select')}
-      />
-    );
-  }
-
-  if (screen === 'initiative') {
-    return (
-      <InitiativeInputScreen
-        combatants={pendingCombatants}
-        initiativeMode={initiativeMode}
-        onStart={handleStartCombat}
-        onBack={() => setScreen('mode')}
-      />
-    );
-  }
+  if (screen === 'select')     return <EncounterSelectScreen encounters={encounters} onSelect={handleSelectEncounter} />;
+  if (screen === 'mode')       return <InitiativeModeScreen encounter={selectedEncounter} onConfirm={handleConfirmMode} onBack={() => setScreen('select')} />;
+  if (screen === 'initiative') return <InitiativeInputScreen combatants={pendingCombatants} initiativeMode={initiativeMode} onStart={handleStartCombat} onBack={() => setScreen('mode')} />;
 
   // ── Combat screen ──────────────────────────────────────────────────────────
 
@@ -813,8 +788,8 @@ export default function CombatRunner({ encounters }) {
 
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-
       <div style={{ flex: 1, minWidth: 0 }}>
+
         {/* Combat header */}
         <div className="combat-header">
           <div className="combat-round">
@@ -831,7 +806,7 @@ export default function CombatRunner({ encounters }) {
           </div>
         </div>
 
-        {/* Combatant rows */}
+        {/* Combatant rows — the outer div is NOT draggable; only the handle triggers drag */}
         <div>
           {combatants.map((c, idx) => {
             const currentHp = c.maxHp - c.damage;
@@ -841,7 +816,8 @@ export default function CombatRunner({ encounters }) {
             const isDead    = currentHp <= 0;
 
             return (
-              <div key={c.id}
+              <div
+                key={c.id}
                 className={[
                   'combatant-row',
                   isActive ? 'active-turn' : '',
@@ -849,15 +825,21 @@ export default function CombatRunner({ encounters }) {
                   draggingId === c.id ? 'dragging' : '',
                   dragOverId === c.id && draggingId !== c.id ? 'drag-over' : '',
                 ].filter(Boolean).join(' ')}
-                draggable
-                onDragStart={e => onDragStart(e, idx)}
-                onDragOver={e => onDragOver(e, idx)}
-                onDragLeave={onDragLeave}
-                onDrop={e => onDrop(e, idx)}
-                onDragEnd={onDragEnd}
+                // Row accepts drops but does NOT initiate drags
+                onDragOver={e => onRowDragOver(e, idx)}
+                onDragLeave={onRowDragLeave}
+                onDrop={e => onRowDrop(e, idx)}
               >
                 <div className="combatant-row-main">
-                  <div className="drag-handle" title="Drag to reorder">
+
+                  {/* Drag handle — only this element is draggable */}
+                  <div
+                    className="drag-handle"
+                    title="Drag to reorder"
+                    draggable
+                    onDragStart={e => onHandleDragStart(e, idx)}
+                    onDragEnd={onDragEnd}
+                  >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                       <circle cx="9"  cy="5"  r="1.5" /><circle cx="15" cy="5"  r="1.5" />
                       <circle cx="9"  cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
