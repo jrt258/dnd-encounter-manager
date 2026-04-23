@@ -334,7 +334,296 @@ function InitInput({ value, onChange, style = {} }) {
   );
 }
 
-// ─── Screen 1: Encounter Select ───────────────────────────────────────────────
+// ─── Action Modal — 3-step attack flow ───────────────────────────────────────
+
+function ActionModal({ attacker, combatants, onApply, onClose }) {
+  const [step, setStep]           = useState('action');  // 'action' | 'target' | 'damage'
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [selectedTarget, setSelectedTarget] = useState(null);
+  const [damageVal, setDamageVal] = useState('');
+  const [rolledBreakdown, setRolledBreakdown] = useState('');
+
+  // Build action list: attacks + spells + custom
+  const attacks = attacker.attacks ?? [];
+  const spells  = (attacker.spells ?? []).filter(s => s.effect || s.damage);
+  const hasActions = attacks.length > 0 || spells.length > 0;
+
+  // Targets: all living combatants except the attacker
+  const targets = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0);
+
+  // Parse a dice expression like "2d6+3" and roll it, returning {total, breakdown}
+  function rollDamageExpr(expr) {
+    if (!expr) return { total: 0, breakdown: '0' };
+    const match = expr.trim().match(/^(\d*)d(\d+)([+-]\d+)?/i);
+    if (!match) {
+      const flat = parseInt(expr) || 0;
+      return { total: flat, breakdown: String(flat) };
+    }
+    const count  = parseInt(match[1] || '1');
+    const sides  = parseInt(match[2]);
+    const mod    = parseInt(match[3] || '0');
+    const rolls  = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+    const total  = rolls.reduce((a, b) => a + b, 0) + mod;
+    const rollStr = count > 1 ? `[${rolls.join('+')}]` : String(rolls[0]);
+    const breakdown = mod !== 0 ? `${rollStr}${mod > 0 ? '+' : ''}${mod}` : rollStr;
+    return { total: Math.max(0, total), breakdown };
+  }
+
+  function handleRoll() {
+    const expr = selectedAction?.damage ?? selectedAction?.effect ?? '';
+    const { total, breakdown } = rollDamageExpr(expr);
+    setDamageVal(String(total));
+    setRolledBreakdown(breakdown);
+  }
+
+  function handleApply() {
+    const dmg = parseInt(damageVal);
+    if (!dmg || !selectedTarget) return;
+    onApply(selectedTarget.id, dmg, selectedAction, attacker);
+    onClose();
+  }
+
+  // ── Step titles ───────────────────────────────────────────────────────────
+  const stepTitle = {
+    action: `${attacker.name} — Choose Action`,
+    target: `${selectedAction?.name ?? 'Action'} — Choose Target`,
+    damage: `${selectedAction?.name ?? 'Action'} → ${selectedTarget?.name ?? '?'} — Damage`,
+  }[step];
+
+  return (
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 480 }}>
+        <div className="modal-header">
+          <span className="modal-title">{stepTitle}</span>
+          <button className="btn-icon" onClick={onClose}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="modal-body">
+
+          {/* ── Step 1: Action picker ── */}
+          {step === 'action' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {attacks.length > 0 && (
+                <>
+                  <div className="section-heading" style={{ marginTop: 0 }}>Attacks</div>
+                  {attacks.map((atk, i) => (
+                    <button key={i} onClick={() => { setSelectedAction({ ...atk, actionType: 'attack' }); setStep('target'); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border)', background: 'var(--surface)',
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{atk.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+                          {atk.hitBonus !== undefined && `${atk.hitBonus >= 0 ? '+' : ''}${atk.hitBonus} to hit`}
+                          {atk.hitBonus !== undefined && atk.damage && ' · '}
+                          {atk.damage && `${atk.damage} ${atk.damageType ?? ''}`}
+                        </div>
+                      </div>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {spells.length > 0 && (
+                <>
+                  <div className="section-heading">Spells</div>
+                  {spells.map((sp, i) => (
+                    <button key={i} onClick={() => { setSelectedAction({ ...sp, actionType: 'spell', damage: sp.effect ?? sp.damage }); setStep('target'); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border)', background: 'var(--surface)',
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name}</span>
+                          <span className="tag tag-purple" style={{ fontSize: 9 }}>{sp.level === 0 ? 'Cantrip' : `Lvl ${sp.level}`}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+                          {sp.effect ?? sp.damage ?? ''}
+                          {sp.defenseType === 'save' && ` · DC ${sp.saveDC} ${sp.saveAbility?.toUpperCase()}`}
+                        </div>
+                      </div>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {/* Custom / other */}
+              <div className="section-heading">{hasActions ? 'Other' : 'Actions'}</div>
+              <button onClick={() => { setSelectedAction({ name: 'Custom', actionType: 'custom', damage: '' }); setStep('target'); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                  border: '1px dashed var(--border-strong)', background: 'var(--surface)',
+                  cursor: 'pointer', textAlign: 'left', width: '100%',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Custom / Other</div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>Unarmed strike, special ability, or manual damage</div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* ── Step 2: Target picker ── */}
+          {step === 'target' && (
+            <div>
+              <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12 }} onClick={() => setStep('action')}>← Back</button>
+              {targets.length === 0 ? (
+                <div className="empty-state" style={{ padding: 24 }}>No valid targets — all other combatants are down.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {targets.map(t => {
+                    const tHp = t.maxHp - t.damage;
+                    const tStatus = hpStatus(tHp, t.maxHp);
+                    return (
+                      <button key={t.id}
+                        onClick={() => { setSelectedTarget(t); setDamageVal(''); setRolledBreakdown(''); setStep('damage'); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border)', background: 'var(--surface)',
+                          cursor: 'pointer', textAlign: 'left', width: '100%',
+                          transition: 'background 0.1s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+                      >
+                        <div className={`combatant-dot ${t.type === 'player' ? 'dot-player' : 'dot-monster'}`} style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{t.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+                            AC {t.ac} · HP {tHp}/{t.maxHp}
+                            {t.conditions.length > 0 && ` · ${t.conditions.join(', ')}`}
+                          </div>
+                        </div>
+                        {/* HP bar */}
+                        <div style={{ width: 60 }}>
+                          <div className="hp-bar-track">
+                            <div className="hp-bar-fill" style={{ width: `${Math.max(0, tHp / t.maxHp) * 100}%`, background: hpBarColor(tStatus) }} />
+                          </div>
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                          <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Step 3: Damage ── */}
+          {step === 'damage' && selectedTarget && (
+            <div>
+              <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={() => setStep('target')}>← Back</button>
+
+              {/* Summary */}
+              <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 16, display: 'flex', gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)' }}>Attacker</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{attacker.name}</div>
+                </div>
+                <div style={{ color: 'var(--text3)', alignSelf: 'center' }}>→</div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)' }}>Target</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{selectedTarget.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace' }}>AC {selectedTarget.ac}</div>
+                </div>
+                <div style={{ marginLeft: 'auto' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)' }}>Action</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{selectedAction?.name}</div>
+                  {selectedAction?.damage && (
+                    <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace' }}>{selectedAction.damage}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Damage input */}
+              <div className="section-heading" style={{ marginTop: 0 }}>Damage</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Enter damage..."
+                    value={damageVal}
+                    onChange={e => { setDamageVal(e.target.value); setRolledBreakdown(''); }}
+                    style={{ fontFamily: 'DM Mono, monospace', fontSize: 22, fontWeight: 500, textAlign: 'center', padding: '10px 12px' }}
+                    autoFocus
+                  />
+                </div>
+                {selectedAction?.damage && (
+                  <button className="btn btn-ghost" onClick={handleRoll} style={{ height: 48, paddingLeft: 16, paddingRight: 16, fontSize: 13 }}>
+                    🎲 Roll {selectedAction.damage}
+                  </button>
+                )}
+              </div>
+
+              {rolledBreakdown && (
+                <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginBottom: 12 }}>
+                  Roll: {rolledBreakdown} = {damageVal}
+                </div>
+              )}
+
+              {/* Half damage shortcut */}
+              {damageVal && parseInt(damageVal) > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setDamageVal(String(Math.floor(parseInt(damageVal) / 2)))}>
+                    ½ damage (save succeeded)
+                  </button>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+                <button
+                  className="btn btn-accent"
+                  disabled={!damageVal || parseInt(damageVal) <= 0}
+                  style={{ opacity: (!damageVal || parseInt(damageVal) <= 0) ? 0.5 : 1 }}
+                  onClick={handleApply}
+                >
+                  Apply {damageVal ? `${damageVal} damage` : 'Damage'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function EncounterSelectScreen({ encounters, onSelect }) {
   return (
@@ -644,6 +933,7 @@ export default function CombatRunner({ encounters }) {
   const [round, setRound]           = useState(1);
   const [turnIdx, setTurnIdx]       = useState(0);
   const [log, setLog]               = useState([]);
+  const [actionModal, setActionModal] = useState(null); // null | combatant object
 
   // Drag — only the handle div is draggable; the outer row is NOT
   const dragIdx     = useRef(null);
@@ -729,6 +1019,18 @@ export default function CombatRunner({ encounters }) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
   }
 
+  function onApplyAction(targetId, damage, action, attacker) {
+    setCombatants(prev => prev.map(c => {
+      if (c.id !== targetId) return c;
+      const newDamage = Math.min(c.maxHp, c.damage + damage);
+      return { ...c, damage: newDamage };
+    }));
+    const target = combatants.find(c => c.id === targetId);
+    const targetHpAfter = target ? Math.max(0, (target.maxHp - target.damage) - damage) : 0;
+    const actionDesc = action?.name ?? 'attack';
+    addLog(`${attacker.name} used ${actionDesc} on ${target?.name ?? '?'} for ${damage} dmg (→ ${targetHpAfter} HP)`, round);
+  }
+
   // ── Drag — only fires from the drag handle div, not the whole row ──────────
 
   function onHandleDragStart(e, idx) {
@@ -777,6 +1079,16 @@ export default function CombatRunner({ encounters }) {
 
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+
+      {/* Action modal */}
+      {actionModal && (
+        <ActionModal
+          attacker={actionModal}
+          combatants={combatants}
+          onApply={onApplyAction}
+          onClose={() => setActionModal(null)}
+        />
+      )}
       <div style={{ flex: 1, minWidth: 0 }}>
 
         {/* Combat header */}
@@ -871,6 +1183,19 @@ export default function CombatRunner({ encounters }) {
                       <span className="combatant-stat-value">{c.speed}</span>
                       <span className="combatant-stat-sub">ft</span>
                     </div>
+                  </div>
+
+                  {/* Action button */}
+                  <div style={{ borderLeft: '1px solid var(--border)', paddingLeft: 8, paddingRight: 4, display: 'flex', alignItems: 'center' }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', color: isDead ? 'var(--text3)' : 'var(--text2)' }}
+                      disabled={isDead}
+                      onClick={() => setActionModal(c)}
+                      title="Use an action or attack"
+                    >
+                      Action
+                    </button>
                   </div>
 
                   <div className="combatant-chevron" onClick={() => toggleExpanded(c.id)}
