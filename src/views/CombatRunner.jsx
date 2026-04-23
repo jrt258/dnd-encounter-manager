@@ -384,12 +384,6 @@ function EncounterSelectScreen({ encounters, onSelect }) {
 function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
   const [mode, setMode] = useState('individual');
 
-  const monsterGroups = [...new Map(
-    encounter.entries
-      .filter(e => e.type === 'monster')
-      .map(e => [e.sourceId, e])
-  ).values()];
-
   return (
     <div style={{ maxWidth: 520 }}>
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>← Back</button>
@@ -401,12 +395,12 @@ function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
           {
             value: 'individual',
             title: 'Individual Initiative',
-            desc: 'Each monster rolls separately. More granular turn order.',
+            desc: 'Each monster rolls separately. More granular turn order, more overhead.',
           },
           {
-            value: 'shared',
-            title: 'Shared Initiative',
-            desc: 'All monsters of the same type act on the same initiative. One roll per group using that group\'s initiative modifier.',
+            value: 'group',
+            title: 'Group Initiative',
+            desc: 'One roll for all monsters — they all act on the same initiative. The official optional rule from the DMG. Fastest play.',
           },
         ].map(opt => (
           <div key={opt.value} onClick={() => setMode(opt.value)} style={{
@@ -434,27 +428,6 @@ function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
           </div>
         ))}
       </div>
-
-      {mode === 'shared' && monsterGroups.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div className="section-heading" style={{ marginTop: 0 }}>Monster Groups</div>
-          <div className="card">
-            {monsterGroups.map(e => {
-              const m = e.monster;
-              const mod = dexMod(m?.abilities) + (m?.initiativeMod ?? 0);
-              return (
-                <div className="list-row" key={e.sourceId}>
-                  <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
-                  <div className="list-row-main">
-                    <div className="list-row-title">{m?.name ?? e.name}</div>
-                    <div className="list-row-sub">×{e.count} · Init mod {mod >= 0 ? `+${mod}` : mod}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <button className="btn btn-accent" style={{ minWidth: 180 }} onClick={() => onConfirm(mode)}>
         Set Initiatives →
@@ -509,16 +482,14 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
   function rollAll() {
     setInitiatives(prev => {
       const next = { ...prev };
-      if (initiativeMode === 'shared') {
-        const rolled = {};
-        combatants.filter(c => c.type === 'monster').forEach(c => {
-          if (!rolled[c.groupKey]) {
-            rolled[c.groupKey] = String(Math.max(1, rollD20() + c.initMod));
-          }
-          next[c.id] = rolled[c.groupKey];
-        });
+      const allMonsters = combatants.filter(c => c.type === 'monster');
+      if (initiativeMode === 'group') {
+        // One roll for all monsters, use highest init mod
+        const rep = allMonsters.reduce((best, c) => c.initMod > (best?.initMod ?? -99) ? c : best, null);
+        const result = String(Math.max(1, rollD20() + (rep?.initMod ?? 0)));
+        allMonsters.forEach(c => { next[c.id] = result; });
       } else {
-        combatants.filter(c => c.type === 'monster').forEach(c => {
+        allMonsters.forEach(c => {
           next[c.id] = String(Math.max(1, rollD20() + c.initMod));
         });
       }
@@ -551,8 +522,8 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>Set Initiatives</div>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
-            {initiativeMode === 'shared'
-              ? 'One roll per monster type — all of that type act together.'
+            {initiativeMode === 'group'
+              ? 'One roll for all monsters — they all act on the same turn.'
               : 'Each combatant rolls separately.'}
           </div>
         </div>
@@ -582,46 +553,64 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
       <div style={{ marginBottom: 20 }}>
         <div className="section-heading" style={{ marginTop: 0 }}>Monsters</div>
         <div className="card">
-          {initiativeMode === 'shared'
-            ? monsterGroups.map(rep => {
-                const count = combatants.filter(c => c.groupKey === rep.groupKey).length;
-                const val   = getGroupVal(rep.groupKey);
-                return (
-                  <div className="list-row" key={rep.groupKey}>
-                    <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
-                    <div className="list-row-main">
-                      <div className="list-row-title">{rep.baseName ?? rep.name}</div>
-                      <div className="list-row-sub">
-                        ×{count} · Init {rep.initMod >= 0 ? `+${rep.initMod}` : rep.initMod}
-                        {count > 1 && ' · All share this roll'}
-                      </div>
-                    </div>
-                    <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
-                      onClick={() => rollGroup(rep.groupKey)}>
-                      🎲 Roll
-                    </button>
-                    <InitInput
-                      value={val}
-                      onChange={val => setGroupVal(rep.groupKey, val)}
-                    />
-                  </div>
-                );
-              })
-            : combatants.filter(c => c.type === 'monster').map(c => (
-                <div className="list-row" key={c.id}>
+          {initiativeMode === 'group' ? (
+            // One roll for ALL monsters — 5e group initiative
+            (() => {
+              const allMonsters = combatants.filter(c => c.type === 'monster');
+              // Use highest dex mod among all monsters as the representative (5e tiebreaker)
+              const rep = allMonsters.reduce((best, c) => c.initMod > (best?.initMod ?? -99) ? c : best, null);
+              const groupVal = rep ? initiatives[rep.id] : '';
+              const totalCount = allMonsters.length;
+              return (
+                <div className="list-row">
                   <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
                   <div className="list-row-main">
-                    <div className="list-row-title">{c.name}</div>
-                    <div className="list-row-sub">Init {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}</div>
+                    <div className="list-row-title">All Monsters</div>
+                    <div className="list-row-sub">
+                      {totalCount} combatant{totalCount !== 1 ? 's' : ''} · highest init mod {rep?.initMod >= 0 ? `+${rep?.initMod}` : rep?.initMod} · all act together
+                    </div>
                   </div>
                   <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
-                    onClick={() => rollIndividual(c.id, c.initMod)}>
+                    onClick={() => {
+                      const result = String(Math.max(1, rollD20() + (rep?.initMod ?? 0)));
+                      setInitiatives(prev => {
+                        const next = { ...prev };
+                        allMonsters.forEach(c => { next[c.id] = result; });
+                        return next;
+                      });
+                    }}>
                     🎲 Roll
                   </button>
-                  <InitInput value={initiatives[c.id]} onChange={val => setVal(c.id, val)} />
+                  <InitInput
+                    value={groupVal}
+                    onChange={val => {
+                      setInitiatives(prev => {
+                        const next = { ...prev };
+                        allMonsters.forEach(c => { next[c.id] = val; });
+                        return next;
+                      });
+                    }}
+                  />
                 </div>
-              ))
-          }
+              );
+            })()
+          ) : (
+            // Individual — one row per monster
+            combatants.filter(c => c.type === 'monster').map(c => (
+              <div className="list-row" key={c.id}>
+                <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                <div className="list-row-main">
+                  <div className="list-row-title">{c.name}</div>
+                  <div className="list-row-sub">Init {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}</div>
+                </div>
+                <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
+                  onClick={() => rollIndividual(c.id, c.initMod)}>
+                  🎲 Roll
+                </button>
+                <InitInput value={initiatives[c.id]} onChange={val => setVal(c.id, val)} />
+              </div>
+            ))
+          )}
         </div>
       </div>
 
