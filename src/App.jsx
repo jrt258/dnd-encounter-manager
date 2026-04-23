@@ -157,6 +157,7 @@ export default function App() {
               setEncounters={setEncounters}
               activeEncounterId={activeEncounterId}
               setActiveEncounterId={setActiveEncounterId}
+              onNavigate={setTab}
             />
           )}
           {tab === 'combat' && (
