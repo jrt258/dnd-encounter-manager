@@ -1,8 +1,19 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import MonsterForm from '../components/MonsterForm';
 import Modal from '../components/Modal';
 
-const SORT_KEYS = { name: 'name', cr: 'cr', hp: 'hp', ac: 'ac', type: 'type' };
+const CR_BRACKETS = [
+  { label: 'All CR', value: 'all' },
+  { label: 'CR 0',   value: '0' },
+  { label: 'CR ⅛',   value: '0.125' },
+  { label: 'CR ¼',   value: '0.25' },
+  { label: 'CR ½',   value: '0.5' },
+  { label: 'CR 1',   value: '1' },
+  { label: 'CR 2',   value: '2' },
+  { label: 'CR 3',   value: '3' },
+  { label: 'CR 4',   value: '4' },
+  { label: 'CR 5+',  value: '5plus' },
+];
 
 function crNumber(cr) {
   if (cr === undefined || cr === '' || cr === null) return -1;
@@ -19,19 +30,55 @@ function crLabel(cr) {
   return fracs[String(cr)] ?? String(cr);
 }
 
+function matchesCrFilter(cr, filter) {
+  if (filter === 'all') return true;
+  const n = crNumber(cr);
+  if (filter === '5plus') return n >= 5;
+  return Math.abs(n - parseFloat(filter)) < 0.001;
+}
+
 function SortIcon({ col, sortCol, sortDir }) {
   if (sortCol !== col) return <span style={{ opacity: 0.3, marginLeft: 4 }}>↕</span>;
   return <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
 }
 
-export default function MonsterLibrary({ monsters, setMonsters, externalEditing, setExternalEditing }) {
-  const [search, setSearch]     = useState('');
-  const [editing, setEditing]   = useState(null);
-  const [expanded, setExpanded] = useState(null);
-  const [sortCol, setSortCol]   = useState('name');
-  const [sortDir, setSortDir]   = useState('asc');
+function FilterPill({ label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '4px 10px',
+        borderRadius: 99,
+        border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border-strong)'}`,
+        background: active ? 'var(--accent-bg)' : 'var(--surface)',
+        color: active ? 'var(--accent-text)' : 'var(--text2)',
+        fontFamily: 'DM Sans, sans-serif',
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        transition: 'all 0.12s',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
 
-  // Merge external "new" trigger from App header button
+export default function MonsterLibrary({ monsters, setMonsters, externalEditing, setExternalEditing }) {
+  const [search, setSearch]         = useState('');
+  const [editing, setEditing]       = useState(null);
+  const [expanded, setExpanded]     = useState(null);
+  const [sortCol, setSortCol]       = useState('name');
+  const [sortDir, setSortDir]       = useState('asc');
+  const [filterType, setFilterType] = useState('all');
+  const [filterCr, setFilterCr]     = useState('all');
+
+  const allTypes = useMemo(() => {
+    const types = [...new Set(monsters.map(m => m.type).filter(Boolean))].sort();
+    return ['all', ...types];
+  }, [monsters]);
+
   const effectiveEditing = externalEditing ?? editing;
   const setEffectiveEditing = (val) => {
     if (setExternalEditing) setExternalEditing(val);
@@ -47,7 +94,6 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
     if (effectiveEditing === 'new') {
       setMonsters(prev => [...prev, { ...data, id: Date.now().toString() }]);
     } else if (effectiveEditing?.isDefault) {
-      // Editing a default: save as a new user-owned copy with a fresh ID
       setMonsters(prev => [...prev, { ...data, id: Date.now().toString(), isDefault: false }]);
     } else {
       setMonsters(prev => prev.map(m => m.id === effectiveEditing.id ? { ...effectiveEditing, ...data } : m));
@@ -62,7 +108,12 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
   }
 
   const filtered = monsters
-    .filter(m => m.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(m => {
+      if (!m.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (filterType !== 'all' && m.type !== filterType) return false;
+      if (!matchesCrFilter(m.cr, filterCr)) return false;
+      return true;
+    })
     .sort((a, b) => {
       let va, vb;
       if (sortCol === 'cr')   { va = crNumber(a.cr); vb = crNumber(b.cr); }
@@ -73,33 +124,72 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
       return 0;
     });
 
+  const hasActiveFilters = filterType !== 'all' || filterCr !== 'all' || search !== '';
+
   return (
     <>
-      {/* Toolbar */}
-      <div className="gap-row" style={{ marginBottom: 14 }}>
-        <div className="search-bar" style={{ flex: 1 }}>
-          <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search monsters…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+      {/* ── Toolbar ── */}
+      <div style={{ marginBottom: 12 }}>
+        <div className="gap-row" style={{ marginBottom: 10 }}>
+          <div className="search-bar" style={{ flex: 1 }}>
+            <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search monsters…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text3)', flexShrink: 0 }}>
+            {filtered.length} of {monsters.length}
+          </span>
+          {hasActiveFilters && (
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ color: 'var(--accent)', flexShrink: 0 }}
+              onClick={() => { setSearch(''); setFilterType('all'); setFilterCr('all'); }}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
-        <span style={{ fontSize: 12, color: 'var(--text3)' }}>
-          {filtered.length} of {monsters.length}
-        </span>
+
+        {/* CR filter pills */}
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+          {CR_BRACKETS.map(b => (
+            <FilterPill
+              key={b.value}
+              label={b.label}
+              active={filterCr === b.value}
+              onClick={() => setFilterCr(filterCr === b.value ? 'all' : b.value)}
+            />
+          ))}
+        </div>
+
+        {/* Type filter pills */}
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          {allTypes.map(t => (
+            <FilterPill
+              key={t}
+              label={t === 'all' ? 'All Types' : t}
+              active={filterType === t}
+              onClick={() => setFilterType(filterType === t ? 'all' : t)}
+            />
+          ))}
+        </div>
       </div>
 
-      {/* Table */}
+      {/* ── Table ── */}
       {filtered.length === 0 ? (
         <div className="card">
           <div className="empty-state">
             <div className="empty-state-icon">🐉</div>
-            {monsters.length === 0 ? 'No monsters yet. Add one to get started.' : 'No monsters match your search.'}
+            {monsters.length === 0
+              ? 'No monsters yet. Add one to get started.'
+              : 'No monsters match your filters.'}
           </div>
         </div>
       ) : (
@@ -137,62 +227,45 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <div className="table-name">{m.name}</div>
                         {m.isDefault && (
-                          <span className="tag tag-blue" style={{ fontSize: 9, letterSpacing: '0.05em' }}>
-                            SRD
-                          </span>
+                          <span className="tag tag-blue" style={{ fontSize: 9 }}>SRD</span>
                         )}
                       </div>
                       {m.size && <div className="table-sub">{m.size}</div>}
                     </td>
-                    <td>
-                      <span className="tag tag-gray">{m.type || 'Monster'}</span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className="table-mono">{crLabel(m.cr)}</span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className="tag tag-red mono">{m.hp ?? '—'}</span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className="tag tag-gray mono">{m.ac ?? '—'}</span>
-                    </td>
+                    <td><span className="tag tag-gray">{m.type || 'Monster'}</span></td>
+                    <td style={{ textAlign: 'center' }}><span className="table-mono">{crLabel(m.cr)}</span></td>
+                    <td style={{ textAlign: 'center' }}><span className="tag tag-red mono">{m.hp ?? '—'}</span></td>
+                    <td style={{ textAlign: 'center' }}><span className="tag tag-gray mono">{m.ac ?? '—'}</span></td>
                     <td>
                       <div className="table-actions" onClick={e => e.stopPropagation()}>
                         <button className="btn-icon" title="Edit" onClick={() => setEffectiveEditing(m)}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                           </svg>
                         </button>
                         {!m.isDefault && (
-                        <button className="btn-icon danger" title="Delete" onClick={() => deleteMonster(m.id)}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
-                          </svg>
-                        </button>
+                          <button className="btn-icon danger" title="Delete" onClick={() => deleteMonster(m.id)}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
+                            </svg>
+                          </button>
                         )}
-                        <svg
-                          width="13" height="13" viewBox="0 0 24 24" fill="none"
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                           stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                          style={{ color: 'var(--text3)', transform: expanded === m.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', cursor: 'pointer' }}
-                        >
+                          style={{ color: 'var(--text3)', transform: expanded === m.id ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', cursor: 'pointer' }}>
                           <polyline points="6 9 12 15 18 9" />
                         </svg>
                       </div>
                     </td>
                   </tr>
 
-                  {/* Expanded detail */}
                   {expanded === m.id && (
                     <tr className="table-expand-row" key={`${m.id}-expand`}>
                       <td colSpan={6}>
                         <div className="table-expand-content">
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-
-                            {/* Ability scores */}
                             {m.abilities && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Ability Scores</div>
@@ -211,8 +284,6 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                                 </div>
                               </div>
                             )}
-
-                            {/* Attacks */}
                             {m.attacks?.length > 0 && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Attacks</div>
@@ -220,36 +291,13 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                                   {m.attacks.map((atk, i) => (
                                     <div className="attack-row" key={i}>
                                       <span className="attack-name">{atk.name}</span>
-                                      {atk.toHit !== undefined && <span className="attack-stat">+{atk.toHit} to hit</span>}
-                                      {atk.damage && <span className="attack-stat">{atk.damage}</span>}
+                                      {atk.hitBonus !== undefined && <span className="attack-stat">{atk.hitBonus >= 0 ? '+' : ''}{atk.hitBonus} to hit</span>}
+                                      {atk.damage && <span className="attack-stat">{atk.damage} {atk.damageType ?? ''}</span>}
                                     </div>
                                   ))}
                                 </div>
                               </div>
                             )}
-
-                            {/* Spell slots */}
-                            {m.spellSlots && Object.values(m.spellSlots).some(v => v > 0) && (
-                              <div>
-                                <div className="section-heading" style={{ marginTop: 0 }}>Spell Slots</div>
-                                <div className="spell-slots-grid">
-                                  {Object.entries(m.spellSlots).map(([lvl, count]) =>
-                                    count > 0 ? (
-                                      <div className="slot-level" key={lvl}>
-                                        <span className="slot-level-label">Lvl {lvl}</span>
-                                        <div className="slot-pips">
-                                          {Array.from({ length: count }).map((_, i) => (
-                                            <div className="slot-pip" key={i} />
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ) : null
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Notes */}
                             {m.notes && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Notes</div>
@@ -268,7 +316,6 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
         </div>
       )}
 
-      {/* Form modal */}
       {effectiveEditing !== null && (
         <Modal
           title={effectiveEditing === 'new' ? 'New Monster' : `Edit ${effectiveEditing.name}`}

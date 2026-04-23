@@ -10,7 +10,6 @@ const NAV_ITEMS = [
   {
     id: 'monsters',
     label: 'Monster Library',
-    sub: 'Manage creatures',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
@@ -24,7 +23,6 @@ const NAV_ITEMS = [
   {
     id: 'players',
     label: 'Player Roster',
-    sub: 'Party members',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
@@ -38,7 +36,6 @@ const NAV_ITEMS = [
   {
     id: 'encounter',
     label: 'Encounter Builder',
-    sub: 'Build your fight',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
@@ -49,7 +46,6 @@ const NAV_ITEMS = [
   {
     id: 'combat',
     label: 'Combat Runner',
-    sub: 'Run the battle',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
         strokeLinecap="round" strokeLinejoin="round" className="nav-icon">
@@ -62,35 +58,26 @@ const NAV_ITEMS = [
   },
 ];
 
-const PAGE_ACTIONS = {
-  monsters: ({ setEditing }) => (
-    <button className="btn btn-accent btn-sm" onClick={() => setEditing('new')}>
-      + Add Monster
-    </button>
-  ),
-  players: ({ setEditing }) => (
-    <button className="btn btn-accent btn-sm" onClick={() => setEditing('new')}>
-      + Add Player
-    </button>
-  ),
-};
-
 export default function App() {
   const [tab, setTab] = useState('monsters');
-  const [userMonsters, setUserMonsters] = useLocalStorage('dnd_monsters', []);
-  const [players, setPlayers]           = useLocalStorage('dnd_players', []);
-  const [encounter, setEncounter]       = useLocalStorage('dnd_encounter', []);
 
-  // Merge defaults + user-created. Defaults are never written to storage.
+  // Monsters: defaults merged with user-created
+  const [userMonsters, setUserMonsters] = useLocalStorage('dnd_monsters', []);
   const monsters = useMemo(() => {
     const userIds = new Set(userMonsters.map(m => m.id));
     const freshDefaults = DEFAULT_MONSTERS.filter(d => !userIds.has(d.id));
     return [...freshDefaults, ...userMonsters];
   }, [userMonsters]);
-
   const setMonsters = setUserMonsters;
 
-  // Lifted "new entity" state so the page header button can trigger the form
+  // Players
+  const [players, setPlayers] = useLocalStorage('dnd_players', []);
+
+  // Encounters: array of { id, name, entries[] }
+  const [encounters, setEncounters]               = useLocalStorage('dnd_encounters', []);
+  const [activeEncounterId, setActiveEncounterId] = useLocalStorage('dnd_active_encounter', null);
+
+  // Lifted editing state for header buttons
   const [monsterEditing, setMonsterEditing] = useState(null);
   const [playerEditing, setPlayerEditing]   = useState(null);
 
@@ -122,13 +109,13 @@ export default function App() {
 
         <div className="sidebar-footer">
           {monsters.length} monster{monsters.length !== 1 ? 's' : ''} ·{' '}
-          {players.length} player{players.length !== 1 ? 's' : ''}
+          {players.length} player{players.length !== 1 ? 's' : ''} ·{' '}
+          {encounters.length} encounter{encounters.length !== 1 ? 's' : ''}
         </div>
       </aside>
 
       {/* ── Main area ── */}
       <div className="main-area">
-        {/* Page header */}
         <div className="page-header">
           <div className="page-title">{currentNav?.label}</div>
           <div className="page-actions">
@@ -145,7 +132,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Page content */}
         <div className="page-content">
           {tab === 'monsters' && (
             <MonsterLibrary
@@ -167,15 +153,15 @@ export default function App() {
             <EncounterBuilder
               monsters={monsters}
               players={players}
-              encounter={encounter}
-              setEncounter={setEncounter}
+              encounters={encounters}
+              setEncounters={setEncounters}
+              activeEncounterId={activeEncounterId}
+              setActiveEncounterId={setActiveEncounterId}
             />
           )}
           {tab === 'combat' && (
             <CombatRunner
-              encounter={encounter}
-              setEncounter={setEncounter}
-              players={players}
+              encounters={encounters}
             />
           )}
         </div>

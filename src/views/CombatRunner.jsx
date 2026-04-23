@@ -36,9 +36,9 @@ function rollDice(expr) {
 
 function hpStatus(currentHp, maxHp) {
   const pct = maxHp > 0 ? currentHp / maxHp : 0;
-  if (pct <= 0)    return 'dead';
-  if (pct < 0.10)  return 'critical';
-  if (pct < 0.50)  return 'bloody';
+  if (pct <= 0)   return 'dead';
+  if (pct < 0.10) return 'critical';
+  if (pct < 0.50) return 'bloody';
   return 'healthy';
 }
 
@@ -50,14 +50,19 @@ function hpStatusClass(status) {
 }
 
 function hpBarColor(status) {
-  if (status === 'healthy')  return 'var(--green)';
-  if (status === 'bloody')   return 'var(--orange)';
+  if (status === 'healthy') return 'var(--green)';
+  if (status === 'bloody')  return 'var(--orange)';
   return 'var(--accent)';
 }
 
-function buildCombatants(encounter) {
+function dexMod(abilities) {
+  return abilities ? Math.floor((abilities.dex - 10) / 2) : 0;
+}
+
+// Build flat combatant list from encounter entries (no initiative yet)
+function buildCombatants(entries) {
   const result = [];
-  for (const entry of encounter) {
+  for (const entry of entries) {
     if (entry.type === 'player') {
       const p = entry.player;
       result.push({
@@ -66,11 +71,11 @@ function buildCombatants(encounter) {
         type: 'player',
         name: p.name,
         maxHp: p.hp ?? 10,
-        damage: 0,           // damage taken (currentHp = maxHp - damage)
+        damage: 0,
         ac: p.ac ?? 10,
         speed: p.speed ?? 30,
         initiative: null,
-        dexMod: p.abilities ? Math.floor((p.abilities.dex - 10) / 2) : 0,
+        initMod: dexMod(p.abilities) + (p.initiativeMod ?? 0),
         conditions: [],
         spellSlots: p.spellSlots ? JSON.parse(JSON.stringify(p.spellSlots)) : null,
         usedSlots: {},
@@ -83,19 +88,23 @@ function buildCombatants(encounter) {
     } else if (entry.type === 'monster') {
       const m = entry.monster;
       const count = entry.count || 1;
+      // For shared initiative: group key = sourceId; representative = highest dex in group (all same here)
+      const groupInitMod = dexMod(m.abilities) + (m.initiativeMod ?? 0);
       for (let i = 0; i < count; i++) {
         const maxHp = m.hpFormula ? rollDice(m.hpFormula) : (m.hp ?? 10);
         result.push({
           id: `${entry.id}-${i}`,
           sourceId: entry.sourceId,
+          groupKey: entry.sourceId,   // used for shared initiative grouping
           type: 'monster',
           name: count > 1 ? `${m.name} ${i + 1}` : m.name,
+          baseName: m.name,
           maxHp,
           damage: 0,
           ac: m.ac ?? 10,
           speed: m.speed ?? 30,
           initiative: null,
-          dexMod: m.abilities ? Math.floor((m.abilities.dex - 10) / 2) : 0,
+          initMod: groupInitMod,
           conditions: [],
           spellSlots: m.spellSlots ? JSON.parse(JSON.stringify(m.spellSlots)) : null,
           usedSlots: {},
@@ -117,17 +126,11 @@ function buildCombatants(encounter) {
 function ConditionChip({ condition, onRemove }) {
   const def = CONDITIONS.find(c => c.id === condition) ?? { label: condition, color: '#666', bg: '#eee' };
   return (
-    <span
-      className="condition-chip"
-      style={{ background: def.bg, color: def.color }}
-      title={def.label}
-    >
+    <span className="condition-chip" style={{ background: def.bg, color: def.color }} title={def.label}>
       {def.label}
       {onRemove && (
-        <span
-          style={{ marginLeft: 2, cursor: 'pointer', opacity: 0.7, fontSize: 10 }}
-          onClick={e => { e.stopPropagation(); onRemove(condition); }}
-        >×</span>
+        <span style={{ marginLeft: 2, cursor: 'pointer', opacity: 0.7, fontSize: 10 }}
+          onClick={e => { e.stopPropagation(); onRemove(condition); }}>×</span>
       )}
     </span>
   );
@@ -139,12 +142,9 @@ function ConditionToggleGrid({ active, onToggle }) {
       {CONDITIONS.map(c => {
         const isActive = active.includes(c.id);
         return (
-          <button
-            key={c.id}
-            className={`condition-toggle${isActive ? ' active' : ''}`}
+          <button key={c.id} className={`condition-toggle${isActive ? ' active' : ''}`}
             style={isActive ? { background: c.color, borderColor: c.color } : {}}
-            onClick={() => onToggle(c.id)}
-          >
+            onClick={() => onToggle(c.id)}>
             {c.label}
           </button>
         );
@@ -157,71 +157,62 @@ function SlotPips({ total, used, onToggle }) {
   return (
     <div className="slot-pips">
       {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          className={`slot-pip${i < used ? ' used' : ''}`}
-          onClick={() => onToggle(i)}
-          title={i < used ? 'Expended' : 'Available'}
-        />
+        <div key={i} className={`slot-pip${i < used ? ' used' : ''}`}
+          onClick={() => onToggle(i)} title={i < used ? 'Expended' : 'Available'} />
       ))}
     </div>
   );
 }
 
-// ─── Expanded detail panel ────────────────────────────────────────────────────
+function QuickHP({ label, color, sign, c, onUpdate }) {
+  const [val, setVal] = useState('');
+  return (
+    <div style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
+      <input type="number" min={0} placeholder="0" value={val}
+        onChange={e => setVal(e.target.value)}
+        style={{ flex: 1, padding: '5px 8px', fontSize: 13 }} />
+      <button className="btn btn-ghost btn-sm" style={{ color, flexShrink: 0 }}
+        onClick={() => {
+          const amt = parseInt(val) || 0;
+          if (amt === 0) return;
+          if (sign < 0) onUpdate(c.id, { damage: Math.min(c.maxHp, c.damage + amt) });
+          else onUpdate(c.id, { damage: Math.max(0, c.damage - amt) });
+          setVal('');
+        }}>
+        {label}
+      </button>
+    </div>
+  );
+}
 
 function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
   const currentHp = c.maxHp - c.damage;
-
   return (
     <div className="combatant-expand">
       <div className="expand-grid">
-
-        {/* Left col: HP editing + initiative */}
         <div>
           <div className="expand-section">
             <div className="expand-section-title">Hit Points</div>
             <div className="hp-edit-row">
               <div className="hp-edit-field">
                 <span className="hp-edit-label">Max HP</span>
-                <input
-                  type="number"
-                  className="hp-edit-input"
-                  min={1}
-                  value={c.maxHp}
-                  onChange={e => onUpdate(c.id, { maxHp: parseInt(e.target.value) || 1 })}
-                />
+                <input type="number" className="hp-edit-input" min={1} value={c.maxHp}
+                  onChange={e => onUpdate(c.id, { maxHp: parseInt(e.target.value) || 1 })} />
               </div>
               <div className="hp-edit-field">
                 <span className="hp-edit-label">Damage Taken</span>
-                <input
-                  type="number"
-                  className="hp-edit-input"
-                  min={0}
-                  max={c.maxHp}
-                  value={c.damage}
-                  onChange={e => onUpdate(c.id, { damage: Math.max(0, Math.min(c.maxHp, parseInt(e.target.value) || 0)) })}
-                />
+                <input type="number" className="hp-edit-input" min={0} max={c.maxHp} value={c.damage}
+                  onChange={e => onUpdate(c.id, { damage: Math.max(0, Math.min(c.maxHp, parseInt(e.target.value) || 0)) })} />
               </div>
               <div className="hp-edit-field">
                 <span className="hp-edit-label">Current HP</span>
-                <div style={{
-                  fontFamily: 'DM Mono, monospace',
-                  fontSize: 15,
-                  fontWeight: 500,
-                  padding: '6px 8px',
-                  background: 'var(--surface2)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  textAlign: 'center',
-                  color: hpBarColor(hpStatus(currentHp, c.maxHp)),
-                }}>
+                <div style={{ fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500, padding: '6px 8px',
+                  background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                  textAlign: 'center', color: hpBarColor(hpStatus(currentHp, c.maxHp)) }}>
                   {currentHp}
                 </div>
               </div>
             </div>
-
-            {/* Quick damage / heal */}
             <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
               <QuickHP label="Damage" color="var(--accent)" sign={-1} c={c} onUpdate={onUpdate} />
               <QuickHP label="Heal"   color="var(--green)"  sign={+1} c={c} onUpdate={onUpdate} />
@@ -234,21 +225,15 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
               <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 500 }}>
                 {c.initiative ?? '—'}
               </span>
-              <button className="btn btn-ghost btn-sm" onClick={() =>
-                onUpdate(c.id, { initiative: rollD20() + c.dexMod })
-              }>
+              <button className="btn btn-ghost btn-sm"
+                onClick={() => onUpdate(c.id, { initiative: rollD20() + c.initMod })}>
                 Reroll d20
               </button>
-              <input
-                type="number"
-                style={{ width: 64, padding: '4px 8px', fontSize: 13 }}
-                placeholder="Set"
-                onBlur={e => { if (e.target.value !== '') onUpdate(c.id, { initiative: parseInt(e.target.value) }); e.target.value = ''; }}
-              />
+              <input type="number" style={{ width: 64, padding: '4px 8px', fontSize: 13 }} placeholder="Set"
+                onBlur={e => { if (e.target.value !== '') onUpdate(c.id, { initiative: parseInt(e.target.value) }); e.target.value = ''; }} />
             </div>
           </div>
 
-          {/* Ability scores */}
           {c.abilities && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Ability Scores</div>
@@ -269,14 +254,12 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
           )}
         </div>
 
-        {/* Right col: conditions, attacks, spells */}
         <div>
           <div className="expand-section">
             <div className="expand-section-title">Conditions</div>
             <ConditionToggleGrid active={c.conditions} onToggle={id => onToggleCondition(c.id, id)} />
           </div>
 
-          {/* Attacks */}
           {c.attacks?.length > 0 && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Attacks</div>
@@ -284,19 +267,14 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
                 {c.attacks.map((atk, i) => (
                   <div className="attack-row" key={i}>
                     <span className="attack-name">{atk.name}</span>
-                    {atk.hitBonus !== undefined && (
-                      <span className="attack-stat">{atk.hitBonus >= 0 ? '+' : ''}{atk.hitBonus} to hit</span>
-                    )}
-                    {atk.damage && (
-                      <span className="attack-stat">{atk.damage} {atk.damageType ?? ''}</span>
-                    )}
+                    {atk.hitBonus !== undefined && <span className="attack-stat">{atk.hitBonus >= 0 ? '+' : ''}{atk.hitBonus} to hit</span>}
+                    {atk.damage && <span className="attack-stat">{atk.damage} {atk.damageType ?? ''}</span>}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Spell slots */}
           {c.spellSlots && Object.values(c.spellSlots).some(v => v > 0) && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Spell Slots</div>
@@ -307,11 +285,7 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
                   return (
                     <div className="slot-level" key={lvl}>
                       <span className="slot-level-label">Lvl {lvl}</span>
-                      <SlotPips
-                        total={total}
-                        used={used}
-                        onToggle={() => onToggleSlot(c.id, lvl)}
-                      />
+                      <SlotPips total={total} used={used} onToggle={() => onToggleSlot(c.id, lvl)} />
                     </div>
                   );
                 })}
@@ -319,61 +293,6 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
             </div>
           )}
 
-          {/* Known spells */}
-          {c.spells?.length > 0 && (
-            <div className="expand-section" style={{ marginTop: 14 }}>
-              <div className="expand-section-title">Spells</div>
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                {[...c.spells]
-                  .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name))
-                  .map((sp, i) => {
-                    const ABILITY_LABELS = { str:'STR', dex:'DEX', con:'CON', int:'INT', wis:'WIS', cha:'CHA' };
-                    let defLine = '';
-                    if (sp.defenseType === 'save') {
-                      defLine = `${ABILITY_LABELS[sp.saveAbility] ?? sp.saveAbility} Save DC ${sp.saveDC}`;
-                      if (sp.onSave) defLine += ` · ${sp.onSave} on save`;
-                    } else if (sp.defenseType === 'attack') {
-                      defLine = `${sp.attackBonus >= 0 ? '+' : ''}${sp.attackBonus} spell attack`;
-                    }
-                    return (
-                      <div
-                        key={sp.id ?? i}
-                        style={{
-                          padding: '8px 10px',
-                          borderBottom: i < c.spells.length - 1 ? '1px solid var(--border)' : 'none',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name}</span>
-                          <span className="tag tag-purple" style={{ fontSize: 9 }}>
-                            {sp.level === 0 ? 'Cantrip' : `Lvl ${sp.level}`}
-                          </span>
-                          {sp.concentration && (
-                            <span className="tag tag-amber" style={{ fontSize: 9 }} title="Concentration">⟳ Conc.</span>
-                          )}
-                          {sp.ritual && (
-                            <span className="tag tag-blue" style={{ fontSize: 9 }} title="Ritual">ℛ Ritual</span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: '0 10px' }}>
-                          <span>{sp.castingTime}</span>
-                          <span>{sp.range}</span>
-                          {sp.effect && <span>{sp.effect}</span>}
-                          {defLine && <span style={{ color: 'var(--accent-text)' }}>{defLine}</span>}
-                        </div>
-                        {sp.description && (
-                          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4, lineHeight: 1.5 }}>
-                            {sp.description}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-          )}
-
-          {/* Notes */}
           {c.notes && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Notes</div>
@@ -386,105 +305,422 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
   );
 }
 
-function QuickHP({ label, color, sign, c, onUpdate }) {
-  const [val, setVal] = useState('');
+// ─── Screen 1: Encounter Select ───────────────────────────────────────────────
+
+function EncounterSelectScreen({ encounters, onSelect }) {
   return (
-    <div style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
-      <input
-        type="number"
-        min={0}
-        placeholder="0"
-        value={val}
-        onChange={e => setVal(e.target.value)}
-        style={{ flex: 1, padding: '5px 8px', fontSize: 13 }}
-      />
-      <button
-        className="btn btn-ghost btn-sm"
-        style={{ color, flexShrink: 0 }}
-        onClick={() => {
-          const amt = parseInt(val) || 0;
-          if (amt === 0) return;
-          if (sign < 0) {
-            // damage
-            onUpdate(c.id, { damage: Math.min(c.maxHp, c.damage + amt) });
-          } else {
-            // heal
-            onUpdate(c.id, { damage: Math.max(0, c.damage - amt) });
-          }
-          setVal('');
-        }}
-      >
-        {label}
+    <div style={{ maxWidth: 560 }}>
+      <div className="section-heading" style={{ marginTop: 0 }}>Select an Encounter to Run</div>
+      {encounters.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">⚔️</div>
+            No encounters saved yet. Build one in the Encounter Builder.
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          {encounters.map(enc => {
+            const monsterCount = enc.entries.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0);
+            const playerCount  = enc.entries.filter(e => e.type === 'player').length;
+            const isEmpty = enc.entries.length === 0;
+            return (
+              <div key={enc.id} className="list-row" style={{ cursor: isEmpty ? 'default' : 'pointer' }}
+                onClick={() => !isEmpty && onSelect(enc)}>
+                <div className="list-row-main">
+                  <div className="list-row-title" style={{ color: isEmpty ? 'var(--text3)' : 'var(--text)' }}>
+                    {enc.name}
+                  </div>
+                  <div className="list-row-sub">
+                    {isEmpty
+                      ? 'Empty — add combatants in Encounter Builder'
+                      : [
+                          monsterCount > 0 ? `${monsterCount} monster${monsterCount !== 1 ? 's' : ''}` : null,
+                          playerCount > 0  ? `${playerCount} player${playerCount !== 1 ? 's' : ''}` : null,
+                        ].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                {!isEmpty && (
+                  <button className="btn btn-accent btn-sm">Run →</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Screen 2: Initiative Mode Select ────────────────────────────────────────
+
+function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
+  const [mode, setMode] = useState('individual'); // 'shared' | 'individual'
+
+  // Get unique monster groups
+  const monsterGroups = [...new Map(
+    encounter.entries
+      .filter(e => e.type === 'monster')
+      .map(e => [e.sourceId, e])
+  ).values()];
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>
+        ← Back
       </button>
+      <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
+        {encounter.name}
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 20 }}>
+        Choose how monster initiative is rolled.
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+        {[
+          {
+            value: 'individual',
+            title: 'Individual Initiative',
+            desc: 'Each monster rolls separately. More granular turn order.',
+          },
+          {
+            value: 'shared',
+            title: 'Shared Initiative',
+            desc: 'All monsters of the same type share one roll (5e group initiative rule). The creature with the highest DEX modifier in the group represents the roll.',
+          },
+        ].map(opt => (
+          <div key={opt.value}
+            onClick={() => setMode(opt.value)}
+            style={{
+              padding: '14px 16px',
+              borderRadius: 'var(--radius)',
+              border: `2px solid ${mode === opt.value ? 'var(--accent)' : 'var(--border)'}`,
+              background: mode === opt.value ? 'var(--accent-bg)' : 'var(--surface)',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{
+                width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                border: `2px solid ${mode === opt.value ? 'var(--accent)' : 'var(--border-strong)'}`,
+                background: mode === opt.value ? 'var(--accent)' : 'transparent',
+                transition: 'all 0.15s',
+              }} />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: mode === opt.value ? 'var(--accent-text)' : 'var(--text)' }}>
+                  {opt.title}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2, lineHeight: 1.5 }}>
+                  {opt.desc}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {mode === 'shared' && monsterGroups.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="section-heading" style={{ marginTop: 0 }}>Monster Groups</div>
+          <div className="card">
+            {monsterGroups.map(e => {
+              const m = e.monster;
+              const mod = dexMod(m?.abilities) + (m?.initiativeMod ?? 0);
+              return (
+                <div className="list-row" key={e.sourceId}>
+                  <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                  <div className="list-row-main">
+                    <div className="list-row-title">{m?.name ?? e.name}</div>
+                    <div className="list-row-sub">×{e.count} · Init mod {mod >= 0 ? `+${mod}` : mod}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <button className="btn btn-accent" style={{ minWidth: 180 }} onClick={() => onConfirm(mode)}>
+        Set Initiatives →
+      </button>
+    </div>
+  );
+}
+
+// ─── Screen 3: Initiative Input ───────────────────────────────────────────────
+
+function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) {
+  // initiatives keyed by combatant id; for shared mode also by groupKey
+  const [initiatives, setInitiatives] = useState(() => {
+    const init = {};
+    combatants.forEach(c => { init[c.id] = ''; });
+    return init;
+  });
+
+  // For shared mode: which groupKeys have been rolled (one entry per group)
+  const monsterGroups = initiativeMode === 'shared'
+    ? [...new Map(
+        combatants
+          .filter(c => c.type === 'monster')
+          .map(c => [c.groupKey, c])
+      ).values()]
+    : [];
+
+  function setVal(id, val) {
+    setInitiatives(prev => ({ ...prev, [id]: val }));
+  }
+
+  // Shared roll: roll once for the group's representative, apply to all in group
+  function rollGroup(groupKey) {
+    const rep = combatants.find(c => c.groupKey === groupKey);
+    if (!rep) return;
+    const roll = rollD20() + rep.initMod;
+    setInitiatives(prev => {
+      const next = { ...prev };
+      combatants.filter(c => c.groupKey === groupKey).forEach(c => { next[c.id] = String(roll); });
+      return next;
+    });
+  }
+
+  function rollAll() {
+    setInitiatives(prev => {
+      const next = { ...prev };
+      if (initiativeMode === 'shared') {
+        // Roll once per group
+        const rolled = {};
+        combatants.filter(c => c.type === 'monster').forEach(c => {
+          if (!rolled[c.groupKey]) {
+            rolled[c.groupKey] = rollD20() + c.initMod;
+          }
+          next[c.id] = String(rolled[c.groupKey]);
+        });
+      } else {
+        combatants.filter(c => c.type === 'monster').forEach(c => {
+          next[c.id] = String(rollD20() + c.initMod);
+        });
+      }
+      return next;
+    });
+  }
+
+  function handleStart() {
+    const withInit = combatants.map(c => ({
+      ...c,
+      initiative: parseInt(initiatives[c.id]) || 0,
+    })).sort((a, b) => b.initiative - a.initiative || b.initMod - a.initMod);
+    onStart(withInit);
+  }
+
+  const players   = combatants.filter(c => c.type === 'player');
+  const monsters  = initiativeMode === 'shared' ? monsterGroups : combatants.filter(c => c.type === 'monster');
+
+  // For shared mode, the "representative" combatant stands in for the group
+  function getGroupInitVal(groupKey) {
+    const member = combatants.find(c => c.groupKey === groupKey);
+    return member ? initiatives[member.id] : '';
+  }
+  function setGroupInitVal(groupKey, val) {
+    setInitiatives(prev => {
+      const next = { ...prev };
+      combatants.filter(c => c.groupKey === groupKey).forEach(c => { next[c.id] = val; });
+      return next;
+    });
+  }
+
+  const allSet = combatants.every(c => initiatives[c.id] !== '' && !isNaN(parseInt(initiatives[c.id])));
+
+  return (
+    <div style={{ maxWidth: 560 }}>
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>
+        ← Back
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>Set Initiatives</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+            {initiativeMode === 'shared' ? 'Monsters share initiative by type.' : 'Each combatant rolls individually.'}
+          </div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={rollAll}>
+          🎲 Roll All Monsters
+        </button>
+      </div>
+
+      {/* Players */}
+      {players.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div className="section-heading" style={{ marginTop: 0 }}>Players</div>
+          <div className="card">
+            {players.map(c => (
+              <div className="list-row" key={c.id}>
+                <div className="combatant-dot dot-player" style={{ flexShrink: 0 }} />
+                <div className="list-row-main">
+                  <div className="list-row-title">{c.name}</div>
+                  <div className="list-row-sub">Enter initiative from player</div>
+                </div>
+                <input
+                  type="number"
+                  placeholder="—"
+                  value={initiatives[c.id]}
+                  onChange={e => setVal(c.id, e.target.value)}
+                  style={{ width: 72, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500 }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Monsters */}
+      <div style={{ marginBottom: 20 }}>
+        <div className="section-heading" style={{ marginTop: 0 }}>Monsters</div>
+        <div className="card">
+          {initiativeMode === 'shared'
+            ? monsterGroups.map(rep => {
+                const count = combatants.filter(c => c.groupKey === rep.groupKey).length;
+                const mod   = rep.initMod;
+                const val   = getGroupInitVal(rep.groupKey);
+                return (
+                  <div className="list-row" key={rep.groupKey}>
+                    <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                    <div className="list-row-main">
+                      <div className="list-row-title">{rep.baseName ?? rep.name}</div>
+                      <div className="list-row-sub">
+                        ×{count} · Init {mod >= 0 ? `+${mod}` : mod}
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ flexShrink: 0 }}
+                      onClick={() => rollGroup(rep.groupKey)}
+                    >
+                      🎲 Roll
+                    </button>
+                    <input
+                      type="number"
+                      placeholder="—"
+                      value={val}
+                      onChange={e => setGroupInitVal(rep.groupKey, e.target.value)}
+                      style={{ width: 72, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500 }}
+                    />
+                  </div>
+                );
+              })
+            : combatants.filter(c => c.type === 'monster').map(c => (
+                <div className="list-row" key={c.id}>
+                  <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                  <div className="list-row-main">
+                    <div className="list-row-title">{c.name}</div>
+                    <div className="list-row-sub">Init {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}</div>
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ flexShrink: 0 }}
+                    onClick={() => setVal(c.id, String(rollD20() + c.initMod))}
+                  >
+                    🎲 Roll
+                  </button>
+                  <input
+                    type="number"
+                    placeholder="—"
+                    value={initiatives[c.id]}
+                    onChange={e => setVal(c.id, e.target.value)}
+                    style={{ width: 72, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 15, fontWeight: 500 }}
+                  />
+                </div>
+              ))
+          }
+        </div>
+      </div>
+
+      <button
+        className="btn btn-accent"
+        style={{ minWidth: 180, opacity: allSet ? 1 : 0.5 }}
+        onClick={handleStart}
+        disabled={!allSet}
+        title={!allSet ? 'Set all initiatives to continue' : ''}
+      >
+        ⚔️ Start Combat
+      </button>
+      {!allSet && (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text3)' }}>
+          All initiatives must be set before starting.
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Main CombatRunner ────────────────────────────────────────────────────────
 
-export default function CombatRunner({ encounter, setEncounter, players }) {
+export default function CombatRunner({ encounters }) {
+  // screen: 'select' | 'mode' | 'initiative' | 'combat'
+  const [screen, setScreen]           = useState('select');
+  const [selectedEncounter, setSelectedEncounter] = useState(null);
+  const [initiativeMode, setInitiativeMode]       = useState('individual');
+  const [pendingCombatants, setPendingCombatants] = useState([]);
+
   const [combatants, setCombatants] = useState([]);
-  const [started, setStarted]       = useState(false);
   const [round, setRound]           = useState(1);
   const [turnIdx, setTurnIdx]       = useState(0);
   const [log, setLog]               = useState([]);
 
   // Drag state
-  const dragIdx   = useRef(null);
+  const dragIdx     = useRef(null);
   const dragOverIdx = useRef(null);
-  const [dragOverId, setDragOverId] = useState(null);
-  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverId, setDragOverId]   = useState(null);
+  const [draggingId, setDraggingId]   = useState(null);
 
-  // ── Logging ──────────────────────────────────────────────────────────────
   const addLog = useCallback((msg, r) => {
     setLog(prev => [{ msg, round: r, id: Date.now() + Math.random() }, ...prev].slice(0, 80));
   }, []);
 
-  // ── Start / end ───────────────────────────────────────────────────────────
-  function startCombat() {
-    if (encounter.length === 0) return;
-    const c = buildCombatants(encounter).map(cb => ({
-      ...cb,
-      initiative: rollD20() + cb.dexMod,
-    })).sort((a, b) => b.initiative - a.initiative || b.dexMod - a.dexMod);
-    setCombatants(c);
-    setStarted(true);
+  // ── Flow handlers ──────────────────────────────────────────────────────────
+
+  function handleSelectEncounter(enc) {
+    setSelectedEncounter(enc);
+    setPendingCombatants(buildCombatants(enc.entries));
+    setScreen('mode');
+  }
+
+  function handleConfirmMode(mode) {
+    setInitiativeMode(mode);
+    setScreen('initiative');
+  }
+
+  function handleStartCombat(sortedCombatants) {
+    setCombatants(sortedCombatants);
     setRound(1);
     setTurnIdx(0);
     setLog([]);
     addLog('⚔️  Combat started!', 1);
-    if (c[0]) addLog(`${c[0].name}'s turn`, 1);
+    if (sortedCombatants[0]) addLog(`${sortedCombatants[0].name}'s turn`, 1);
+    setScreen('combat');
   }
 
   function endCombat() {
-    if (!confirm('End combat and reset?')) return;
-    setStarted(false);
+    if (!confirm('End combat and return to encounter select?')) return;
+    setScreen('select');
+    setSelectedEncounter(null);
     setCombatants([]);
     setRound(1);
     setTurnIdx(0);
     setLog([]);
   }
 
-  // ── Turn management ───────────────────────────────────────────────────────
+  // ── Turn management ────────────────────────────────────────────────────────
+
   function nextTurn() {
     setCombatants(prev => {
       let next = turnIdx + 1;
       let newRound = round;
-
-      if (next >= prev.length) {
-        next = 0;
-        newRound = round + 1;
-        addLog(`── Round ${newRound} begins ──`, newRound);
-      }
-
-      // Skip dead
+      if (next >= prev.length) { next = 0; newRound = round + 1; addLog(`── Round ${newRound} begins ──`, newRound); }
       let safety = 0;
       while (prev[next] && (prev[next].maxHp - prev[next].damage) <= 0 && safety < prev.length) {
         next = (next + 1) % prev.length;
         if (next === 0) newRound++;
         safety++;
       }
-
       setTurnIdx(next);
       setRound(newRound);
       if (prev[next]) addLog(`${prev[next].name}'s turn`, newRound);
@@ -492,7 +728,6 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
     });
   }
 
-  // ── Update combatant ──────────────────────────────────────────────────────
   function updateCombatant(id, changes) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, ...changes } : c));
   }
@@ -501,9 +736,7 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
     setCombatants(prev => prev.map(c => {
       if (c.id !== id) return c;
       const has = c.conditions.includes(condId);
-      const conditions = has
-        ? c.conditions.filter(x => x !== condId)
-        : [...c.conditions, condId];
+      const conditions = has ? c.conditions.filter(x => x !== condId) : [...c.conditions, condId];
       addLog(`${c.name} ${has ? 'lost' : 'gained'} ${condId}`, round);
       return { ...c, conditions };
     }));
@@ -524,120 +757,77 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
   }
 
-  // ── Drag and drop ─────────────────────────────────────────────────────────
-  function onDragStart(e, idx) {
-    dragIdx.current = idx;
-    setDraggingId(combatants[idx].id);
-    e.dataTransfer.effectAllowed = 'move';
-  }
+  // ── Drag and drop ──────────────────────────────────────────────────────────
 
-  function onDragOver(e, idx) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    dragOverIdx.current = idx;
-    setDragOverId(combatants[idx].id);
-  }
-
-  function onDragLeave() {
-    setDragOverId(null);
-  }
+  function onDragStart(e, idx) { dragIdx.current = idx; setDraggingId(combatants[idx].id); e.dataTransfer.effectAllowed = 'move'; }
+  function onDragOver(e, idx)  { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; dragOverIdx.current = idx; setDragOverId(combatants[idx].id); }
+  function onDragLeave()       { setDragOverId(null); }
+  function onDragEnd()         { dragIdx.current = null; setDraggingId(null); setDragOverId(null); }
 
   function onDrop(e, idx) {
     e.preventDefault();
     const from = dragIdx.current;
     if (from === null || from === idx) return;
-
     setCombatants(prev => {
       const next = [...prev];
       const [moved] = next.splice(from, 1);
       next.splice(idx, 0, moved);
-
-      // Adjust turnIdx to keep the same combatant active
       if (turnIdx === from) setTurnIdx(idx);
       else if (from < turnIdx && idx >= turnIdx) setTurnIdx(t => t - 1);
       else if (from > turnIdx && idx <= turnIdx) setTurnIdx(t => t + 1);
-
       return next;
     });
-
-    dragIdx.current = null;
-    setDraggingId(null);
-    setDragOverId(null);
+    dragIdx.current = null; setDraggingId(null); setDragOverId(null);
   }
 
-  function onDragEnd() {
-    dragIdx.current = null;
-    setDraggingId(null);
-    setDragOverId(null);
+  // ── Render screens ─────────────────────────────────────────────────────────
+
+  if (screen === 'select') {
+    return <EncounterSelectScreen encounters={encounters} onSelect={handleSelectEncounter} />;
   }
 
-  // ── Not started ───────────────────────────────────────────────────────────
-  if (!started) {
+  if (screen === 'mode') {
     return (
-      <>
-        {encounter.length === 0 ? (
-          <div className="card">
-            <div className="empty-state">
-              <div className="empty-state-icon">⚔️</div>
-              Build an encounter first in the Encounter Builder.
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="card" style={{ marginBottom: 16 }}>
-              {encounter.map(e => (
-                <div className="list-row" key={e.id}>
-                  <div className={`combatant-dot ${e.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
-                  <div className="list-row-main">
-                    <div className="list-row-title">{e.name}</div>
-                    <div className="list-row-sub">
-                      {e.type === 'player' ? 'Player' : `Monster × ${e.count || 1}`}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button className="btn btn-accent" style={{ minWidth: 180 }} onClick={startCombat}>
-              ⚔️  Start Combat
-            </button>
-          </>
-        )}
-      </>
+      <InitiativeModeScreen
+        encounter={selectedEncounter}
+        onConfirm={handleConfirmMode}
+        onBack={() => setScreen('select')}
+      />
     );
   }
 
-  // ── Combat running ────────────────────────────────────────────────────────
+  if (screen === 'initiative') {
+    return (
+      <InitiativeInputScreen
+        combatants={pendingCombatants}
+        initiativeMode={initiativeMode}
+        onStart={handleStartCombat}
+        onBack={() => setScreen('mode')}
+      />
+    );
+  }
+
+  // ── Combat screen ──────────────────────────────────────────────────────────
+
   const activeCombatant = combatants[turnIdx];
 
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
 
-      {/* ── Left: Initiative order ─────────────────────────────────────────── */}
       <div style={{ flex: 1, minWidth: 0 }}>
-
         {/* Combat header */}
         <div className="combat-header">
           <div className="combat-round">
             <span className="combat-round-label">Round</span>
             <span className="combat-round-num">{round}</span>
           </div>
-
           <div className="combat-active-label">
             <div className="combat-active-title">Active Turn</div>
             <div className="combat-active-name">{activeCombatant?.name ?? '—'}</div>
           </div>
-
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-accent" onClick={nextTurn}>
-              Next Turn →
-            </button>
-            <button
-              className="btn btn-ghost"
-              style={{ color: 'var(--accent)' }}
-              onClick={endCombat}
-            >
-              End Combat
-            </button>
+            <button className="btn btn-accent" onClick={nextTurn}>Next Turn →</button>
+            <button className="btn btn-ghost" style={{ color: 'var(--accent)' }} onClick={endCombat}>End Combat</button>
           </div>
         </div>
 
@@ -651,13 +841,12 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
             const isDead    = currentHp <= 0;
 
             return (
-              <div
-                key={c.id}
+              <div key={c.id}
                 className={[
                   'combatant-row',
-                  isActive   ? 'active-turn' : '',
-                  isDead     ? 'dead'         : '',
-                  draggingId === c.id ? 'dragging'  : '',
+                  isActive ? 'active-turn' : '',
+                  isDead   ? 'dead' : '',
+                  draggingId === c.id ? 'dragging' : '',
                   dragOverId === c.id && draggingId !== c.id ? 'drag-over' : '',
                 ].filter(Boolean).join(' ')}
                 draggable
@@ -667,10 +856,7 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
                 onDrop={e => onDrop(e, idx)}
                 onDragEnd={onDragEnd}
               >
-                {/* ── Main row ────────────────────────────────────────────── */}
                 <div className="combatant-row-main">
-
-                  {/* Drag handle */}
                   <div className="drag-handle" title="Drag to reorder">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                       <circle cx="9"  cy="5"  r="1.5" /><circle cx="15" cy="5"  r="1.5" />
@@ -679,37 +865,23 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
                     </svg>
                   </div>
 
-                  {/* Initiative */}
-                  <div className="combatant-init" title="Initiative">
-                    {c.initiative ?? '—'}
-                  </div>
-
-                  {/* Type dot */}
+                  <div className="combatant-init" title="Initiative">{c.initiative ?? '—'}</div>
                   <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
 
-                  {/* Name + conditions */}
                   <div className="combatant-name-col">
                     <div className="combatant-name">{c.name}</div>
                     {c.conditions.length > 0 && (
                       <div className="combatant-conditions">
-                        {c.conditions.map(cond => (
-                          <ConditionChip key={cond} condition={cond} />
-                        ))}
+                        {c.conditions.map(cond => <ConditionChip key={cond} condition={cond} />)}
                       </div>
                     )}
-                    {/* HP bar */}
                     <div className="hp-bar-track" style={{ marginTop: 4 }}>
-                      <div
-                        className="hp-bar-fill"
-                        style={{ width: `${Math.max(0, hpPct) * 100}%`, background: hpBarColor(status) }}
-                      />
+                      <div className="hp-bar-fill"
+                        style={{ width: `${Math.max(0, hpPct) * 100}%`, background: hpBarColor(status) }} />
                     </div>
                   </div>
 
-                  {/* Stat columns */}
                   <div className="combatant-stats">
-
-                    {/* HP */}
                     <div className="combatant-stat">
                       <span className="combatant-stat-label">HP</span>
                       <span className={`combatant-stat-value ${hpStatusClass(status)}`}>
@@ -719,47 +891,30 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
                       </span>
                       <span className="combatant-stat-sub">/ {c.maxHp}</span>
                     </div>
-
-                    {/* AC */}
                     <div className="combatant-stat">
                       <span className="combatant-stat-label">AC</span>
                       <span className="combatant-stat-value">{c.ac}</span>
                     </div>
-
-                    {/* Speed */}
                     <div className="combatant-stat">
                       <span className="combatant-stat-label">Speed</span>
                       <span className="combatant-stat-value">{c.speed}</span>
                       <span className="combatant-stat-sub">ft</span>
                     </div>
-
                   </div>
 
-                  {/* Chevron toggle */}
-                  <div
-                    className="combatant-chevron"
-                    onClick={() => toggleExpanded(c.id)}
-                    title={c.expanded ? 'Collapse' : 'Expand'}
-                  >
-                    <svg
-                      width="14" height="14" viewBox="0 0 24 24"
-                      fill="none" stroke="currentColor" strokeWidth="2.5"
-                      strokeLinecap="round" strokeLinejoin="round"
-                      style={{ transform: c.expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
-                    >
+                  <div className="combatant-chevron" onClick={() => toggleExpanded(c.id)}
+                    title={c.expanded ? 'Collapse' : 'Expand'}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ transform: c.expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
                       <polyline points="6 9 12 15 18 9" />
                     </svg>
                   </div>
                 </div>
 
-                {/* ── Expanded panel ───────────────────────────────────────── */}
                 {c.expanded && (
-                  <CombatantExpand
-                    c={c}
-                    onUpdate={updateCombatant}
-                    onToggleSlot={toggleSlot}
-                    onToggleCondition={toggleCondition}
-                  />
+                  <CombatantExpand c={c} onUpdate={updateCombatant}
+                    onToggleSlot={toggleSlot} onToggleCondition={toggleCondition} />
                 )}
               </div>
             );
@@ -767,7 +922,7 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
         </div>
       </div>
 
-      {/* ── Right: Combat log ─────────────────────────────────────────────── */}
+      {/* Combat log */}
       <div style={{ width: 260, flexShrink: 0 }}>
         <div className="combat-log">
           <div className="combat-log-header">Combat Log</div>
@@ -786,7 +941,6 @@ export default function CombatRunner({ encounter, setEncounter, players }) {
           </div>
         </div>
       </div>
-
     </div>
   );
 }
