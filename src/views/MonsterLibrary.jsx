@@ -46,6 +46,9 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
   function saveMonster(data) {
     if (effectiveEditing === 'new') {
       setMonsters(prev => [...prev, { ...data, id: Date.now().toString() }]);
+    } else if (effectiveEditing?.isDefault) {
+      // Editing a default: save as a new user-owned copy with a fresh ID
+      setMonsters(prev => [...prev, { ...data, id: Date.now().toString(), isDefault: false }]);
     } else {
       setMonsters(prev => prev.map(m => m.id === effectiveEditing.id ? { ...effectiveEditing, ...data } : m));
     }
@@ -131,7 +134,14 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                     onClick={() => setExpanded(expanded === m.id ? null : m.id)}
                   >
                     <td>
-                      <div className="table-name">{m.name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div className="table-name">{m.name}</div>
+                        {m.isDefault && (
+                          <span className="tag tag-blue" style={{ fontSize: 9, letterSpacing: '0.05em' }}>
+                            SRD
+                          </span>
+                        )}
+                      </div>
                       {m.size && <div className="table-sub">{m.size}</div>}
                     </td>
                     <td>
@@ -155,6 +165,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                           </svg>
                         </button>
+                        {!m.isDefault && (
                         <button className="btn-icon danger" title="Delete" onClick={() => deleteMonster(m.id)}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -162,6 +173,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                             <path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
                           </svg>
                         </button>
+                        )}
                         <svg
                           width="13" height="13" viewBox="0 0 24 24" fill="none"
                           stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"

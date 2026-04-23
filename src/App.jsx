@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import MonsterLibrary from './views/MonsterLibrary';
 import PlayerRoster from './views/PlayerRoster';
 import EncounterBuilder from './views/EncounterBuilder';
 import CombatRunner from './views/CombatRunner';
 import { useLocalStorage } from './hooks/useLocalStorage';
+import { DEFAULT_MONSTERS } from './defaultMonsters';
 
 const NAV_ITEMS = [
   {
@@ -76,9 +77,18 @@ const PAGE_ACTIONS = {
 
 export default function App() {
   const [tab, setTab] = useState('monsters');
-  const [monsters, setMonsters] = useLocalStorage('dnd_monsters', []);
-  const [players, setPlayers]   = useLocalStorage('dnd_players', []);
-  const [encounter, setEncounter] = useLocalStorage('dnd_encounter', []);
+  const [userMonsters, setUserMonsters] = useLocalStorage('dnd_monsters', []);
+  const [players, setPlayers]           = useLocalStorage('dnd_players', []);
+  const [encounter, setEncounter]       = useLocalStorage('dnd_encounter', []);
+
+  // Merge defaults + user-created. Defaults are never written to storage.
+  const monsters = useMemo(() => {
+    const userIds = new Set(userMonsters.map(m => m.id));
+    const freshDefaults = DEFAULT_MONSTERS.filter(d => !userIds.has(d.id));
+    return [...freshDefaults, ...userMonsters];
+  }, [userMonsters]);
+
+  const setMonsters = setUserMonsters;
 
   // Lifted "new entity" state so the page header button can trigger the form
   const [monsterEditing, setMonsterEditing] = useState(null);
