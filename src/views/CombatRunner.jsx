@@ -87,6 +87,7 @@ function buildCombatants(entries) {
         initiative: null,
         initMod: dexMod(p.abilities) + (p.initiativeMod ?? 0),
         conditions: [],
+        tempHp: 0,
         spellSlots: p.spellSlots ? JSON.parse(JSON.stringify(p.spellSlots)) : null,
         usedSlots: {},
         attacks: p.attacks ?? [],
@@ -115,6 +116,7 @@ function buildCombatants(entries) {
           initiative: null,
           initMod: groupInitMod,
           conditions: [],
+          tempHp: 0,
           spellSlots: m.spellSlots ? JSON.parse(JSON.stringify(m.spellSlots)) : null,
           usedSlots: {},
           attacks: m.attacks ?? [],
@@ -177,48 +179,71 @@ function SlotPips({ total, used, onToggle }) {
   );
 }
 
-// QuickHP now accepts addLog + round so dropdown HP changes appear in the log
+// Apply damage, absorbing temp HP first. Returns { newDamage, newTempHp, absorbed }
+function applyDamageWithTemp(c, amt) {
+  const absorbed  = Math.min(c.tempHp || 0, amt);
+  const remainder = amt - absorbed;
+  const newTempHp = (c.tempHp || 0) - absorbed;
+  const newDamage = Math.min(c.maxHp, c.damage + remainder);
+  return { newDamage, newTempHp, absorbed };
+}
+
 function QuickHP({ label, color, sign, c, onUpdate, addLog, round }) {
   const [val, setVal] = useState('');
+
+  function apply() {
+    const amt = parseInt(val) || 0;
+    if (amt === 0) return;
+    if (sign < 0) {
+      // Damage — temp HP absorbs first
+      const { newDamage, newTempHp, absorbed } = applyDamageWithTemp(c, amt);
+      onUpdate(c.id, { damage: newDamage, tempHp: newTempHp });
+      const hpAfter = c.maxHp - newDamage;
+      const absorbedNote = absorbed > 0 ? ` (${absorbed} absorbed by temp HP)` : '';
+      addLog(`${c.name} took ${amt} damage${absorbedNote} (→ ${hpAfter} HP)`, round);
+    } else {
+      // Heal — restores real HP, doesn't touch temp HP
+      const newDmg = Math.max(0, c.damage - amt);
+      onUpdate(c.id, { damage: newDmg });
+      addLog(`${c.name} healed ${amt} HP (→ ${c.maxHp - newDmg} HP)`, round);
+    }
+    setVal('');
+  }
+
   return (
     <div style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
       <input type="number" min={0} placeholder="0" value={val}
         onChange={e => setVal(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            const amt = parseInt(val) || 0;
-            if (amt === 0) return;
-            const currentHp = c.maxHp - c.damage;
-            if (sign < 0) {
-              const newDmg = Math.min(c.maxHp, c.damage + amt);
-              onUpdate(c.id, { damage: newDmg });
-              addLog(`${c.name} took ${amt} damage (→ ${c.maxHp - newDmg} HP)`, round);
-            } else {
-              const newDmg = Math.max(0, c.damage - amt);
-              onUpdate(c.id, { damage: newDmg });
-              addLog(`${c.name} healed ${amt} HP (→ ${c.maxHp - newDmg} HP)`, round);
-            }
-            setVal('');
-          }
-        }}
+        onKeyDown={e => { if (e.key === 'Enter') apply(); }}
         style={{ flex: 1, padding: '5px 8px', fontSize: 13 }} />
-      <button className="btn btn-ghost btn-sm" style={{ color, flexShrink: 0, minWidth: 64 }}
-        onClick={() => {
-          const amt = parseInt(val) || 0;
-          if (amt === 0) return;
-          const currentHp = c.maxHp - c.damage;
-          if (sign < 0) {
-            const newDmg = Math.min(c.maxHp, c.damage + amt);
-            onUpdate(c.id, { damage: newDmg });
-            addLog(`${c.name} took ${amt} damage (→ ${c.maxHp - newDmg} HP)`, round);
-          } else {
-            const newDmg = Math.max(0, c.damage - amt);
-            onUpdate(c.id, { damage: newDmg });
-            addLog(`${c.name} healed ${amt} HP (→ ${c.maxHp - newDmg} HP)`, round);
-          }
-          setVal('');
-        }}>
+      <button className="btn btn-ghost btn-sm" style={{ color, flexShrink: 0, minWidth: 64 }} onClick={apply}>
         {label}
+      </button>
+    </div>
+  );
+}
+
+function QuickTempHP({ c, onUpdate, addLog, round }) {
+  const [val, setVal] = useState('');
+
+  function apply() {
+    const amt = parseInt(val) || 0;
+    if (amt === 0) return;
+    // Per 5e rules, temp HP doesn't stack — take the higher value
+    const newTemp = Math.max(c.tempHp || 0, amt);
+    onUpdate(c.id, { tempHp: newTemp });
+    addLog(`${c.name} gained ${amt} temp HP (total: ${newTemp})`, round);
+    setVal('');
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
+      <input type="number" min={0} placeholder="0" value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') apply(); }}
+        style={{ flex: 1, padding: '5px 8px', fontSize: 13 }} />
+      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--blue-text, #3b82f6)', flexShrink: 0, minWidth: 64 }} onClick={apply}>
+        Temp HP
       </button>
     </div>
   );
@@ -246,6 +271,9 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, addLog,
             {currentHp}
           </div>
           <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'DM Mono, monospace' }}>/ {c.maxHp}</div>
+          {(c.tempHp || 0) > 0 && (
+            <div style={{ fontSize: 10, color: '#3b82f6', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>+{c.tempHp}t</div>
+          )}
         </div>
         {/* AC */}
         <div style={{ padding: '8px 12px', borderRight: '1px solid var(--border)', textAlign: 'center', minWidth: 56 }}>
@@ -316,6 +344,16 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, addLog,
             <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
               <QuickHP label="Damage" color="var(--accent)" sign={-1} c={c} onUpdate={onUpdate} addLog={addLog} round={round} />
               <QuickHP label="Heal"   color="var(--green)"  sign={+1} c={c} onUpdate={onUpdate} addLog={addLog} round={round} />
+            </div>
+            {/* Temp HP row */}
+            <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+              <QuickTempHP c={c} onUpdate={onUpdate} addLog={addLog} round={round} />
+              {(c.tempHp || 0) > 0 && (
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--text3)', flexShrink: 0 }}
+                  onClick={() => { onUpdate(c.id, { tempHp: 0 }); addLog(`${c.name} lost all temp HP`, round); }}>
+                  Clear
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -406,6 +444,7 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
   const [selectedTarget, setSelectedTarget]   = useState(null);
   const [damageVal, setDamageVal]             = useState('');
   const [healVal, setHealVal]                 = useState('');
+  const [tempHpVal, setTempHpVal]             = useState('');
   const [rolledBreakdown, setRolledBreakdown] = useState('');
   const [conditionToApply, setConditionToApply] = useState('');
   const [condTurnsInput, setCondTurnsInput]   = useState('');
@@ -439,9 +478,10 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
   function handleApply() {
     const dmg   = parseInt(damageVal) || 0;
     const heal  = parseInt(healVal) || 0;
+    const tmpHp = parseInt(tempHpVal) || 0;
     const turns = condTurnsInput ? parseInt(condTurnsInput) : null;
     if (!selectedTarget) return;
-    onApply(selectedTarget.id, dmg, heal, conditionToApply || null, turns, selectedAction, attacker);
+    onApply(selectedTarget.id, dmg, heal, tmpHp, conditionToApply || null, turns, selectedAction, attacker);
     onClose();
   }
 
@@ -541,7 +581,7 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
                     const tStatus = hpStatus(tHp, t.maxHp);
                     return (
                       <button key={t.id}
-                        onClick={() => { setSelectedTarget(t); setDamageVal(''); setHealVal(''); setConditionToApply(''); setCondTurnsInput(''); setRolledBreakdown(''); setStep('damage'); }}
+                        onClick={() => { setSelectedTarget(t); setDamageVal(''); setHealVal(''); setTempHpVal(''); setConditionToApply(''); setCondTurnsInput(''); setRolledBreakdown(''); setStep('damage'); }}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', textAlign: 'left', width: '100%', transition: 'background 0.1s' }}
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
                         onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}>
@@ -585,7 +625,7 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
                 </div>
               </div>
 
-              {/* Damage + Healing side by side, equal width */}
+              {/* Damage + Healing + Temp HP — equal width columns */}
               <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
                 <div style={{ flex: 1 }}>
                   <div className="field-label" style={{ marginBottom: 6 }}>Damage</div>
@@ -607,15 +647,22 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
                   )}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div className="field-label" style={{ marginBottom: 6 }}>Healing <span style={{ fontWeight: 400, color: 'var(--text3)', fontSize: 10 }}>(optional)</span></div>
+                  <div className="field-label" style={{ marginBottom: 6 }}>Healing <span style={{ fontWeight: 400, color: 'var(--text3)', fontSize: 10 }}>(opt)</span></div>
                   <input
                     type="number" min={0} placeholder="0"
                     value={healVal} onChange={e => setHealVal(e.target.value)}
                     style={{ width: '100%', fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 600, textAlign: 'center', color: 'var(--green)' }}
                   />
-                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4, textAlign: 'center' }}>
-                    e.g. life drain
-                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4, textAlign: 'center' }}>real HP</div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="field-label" style={{ marginBottom: 6 }}>Temp HP <span style={{ fontWeight: 400, color: 'var(--text3)', fontSize: 10 }}>(opt)</span></div>
+                  <input
+                    type="number" min={0} placeholder="0"
+                    value={tempHpVal} onChange={e => setTempHpVal(e.target.value)}
+                    style={{ width: '100%', fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 600, textAlign: 'center', color: '#3b82f6' }}
+                  />
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4, textAlign: 'center' }}>blue bar</div>
                 </div>
               </div>
 
@@ -650,7 +697,7 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
                 className="btn btn-accent"
                 style={{ width: '100%' }}
                 onClick={handleApply}
-                disabled={!damageVal && !healVal && !conditionToApply}>
+                disabled={!damageVal && !healVal && !tempHpVal && !conditionToApply}>
                 Apply to {selectedTarget.name}
               </button>
             </div>
@@ -957,28 +1004,44 @@ export default function CombatRunner({
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
   }
 
-  function onApplyAction(targetId, damage, heal, condition, condTurns, action, attacker) {
+  function onApplyAction(targetId, damage, heal, tmpHp, condition, condTurnsVal, action, attacker) {
     setCombatants(prev => prev.map(c => {
       if (c.id !== targetId) return c;
-      let newDamage = Math.min(c.maxHp, c.damage + (damage || 0));
-      newDamage = Math.max(0, newDamage - (heal || 0));
+      // Damage absorbs temp HP first
+      let newTempHp = c.tempHp || 0;
+      let newDamage = c.damage;
+      if (damage) {
+        const absorbed  = Math.min(newTempHp, damage);
+        newTempHp = newTempHp - absorbed;
+        newDamage = Math.min(c.maxHp, c.damage + (damage - absorbed));
+      }
+      // Healing restores real HP
+      if (heal) newDamage = Math.max(0, newDamage - heal);
+      // Temp HP: take higher per 5e rules
+      if (tmpHp) newTempHp = Math.max(newTempHp, tmpHp);
+      // Condition
       let conditions = c.conditions;
       if (condition && !conditions.find(a => condId(a) === condition)) {
-        const entry = condTurns !== null ? { id: condition, turnsLeft: condTurns } : { id: condition, turnsLeft: null };
+        const entry = condTurnsVal !== null ? { id: condition, turnsLeft: condTurnsVal } : { id: condition, turnsLeft: null };
         conditions = [...conditions, entry];
       }
-      return { ...c, damage: newDamage, conditions };
+      return { ...c, damage: newDamage, tempHp: newTempHp, conditions };
     }));
-    const target    = combatants.find(c => c.id === targetId);
-    const hpBefore  = target ? target.maxHp - target.damage : 0;
-    const hpAfter   = Math.max(0, Math.min(target?.maxHp ?? 0, hpBefore - (damage || 0) + (heal || 0)));
+
+    const target   = combatants.find(c => c.id === targetId);
+    const curTmp   = target?.tempHp || 0;
+    const absorbed = damage ? Math.min(curTmp, damage) : 0;
+    const realDmg  = damage ? damage - absorbed : 0;
+    const hpBefore = target ? target.maxHp - target.damage : 0;
+    const hpAfter  = Math.max(0, Math.min(target?.maxHp ?? 0, hpBefore - realDmg + (heal || 0)));
     const actionDesc = action?.name ?? 'attack';
     let logMsg = `${attacker.name} used ${actionDesc} on ${target?.name ?? '?'}`;
-    if (damage) logMsg += ` for ${damage} dmg`;
-    if (heal)   logMsg += `${damage ? ',' : ''} healed ${heal}`;
+    if (damage)    logMsg += ` for ${damage} dmg${absorbed > 0 ? ` (${absorbed} to temp HP)` : ''}`;
+    if (heal)      logMsg += `${damage ? ',' : ''} healed ${heal}`;
+    if (tmpHp)     logMsg += `${damage || heal ? ',' : ''} +${tmpHp} temp HP`;
     logMsg += ` (→ ${hpAfter} HP)`;
     if (condition) {
-      const turnStr = condTurns !== null ? ` for ${condTurns} turns` : '';
+      const turnStr = condTurnsVal !== null ? ` for ${condTurnsVal} turns` : '';
       logMsg += ` · gains ${condition}${turnStr}`;
     }
     addLog(logMsg, round);
@@ -1104,10 +1167,24 @@ export default function CombatRunner({
                         ))}
                       </div>
                     )}
-                    {/* HP bar — original (no maxWidth constraint) */}
-                    <div className="hp-bar-track" style={{ marginTop: 4 }}>
+                    {/* HP bar — green base + blue temp HP overlay, both from left */}
+                    <div className="hp-bar-track" style={{ marginTop: 4, position: 'relative' }}>
+                      {/* Real HP */}
                       <div className="hp-bar-fill"
                         style={{ width: `${Math.max(0, hpPct) * 100}%`, background: hpBarColor(status) }} />
+                      {/* Temp HP — blue, layered on top, starting from left */}
+                      {(c.tempHp || 0) > 0 && (
+                        <div style={{
+                          position: 'absolute', top: 0, left: 0,
+                          height: '100%',
+                          width: `${Math.min(100, ((c.tempHp || 0) / c.maxHp) * 100)}%`,
+                          background: '#3b82f6',
+                          borderRadius: 99,
+                          opacity: 0.85,
+                          transition: 'width 0.4s cubic-bezier(.4,0,.2,1)',
+                          pointerEvents: 'none',
+                        }} />
+                      )}
                     </div>
                   </div>
 
@@ -1120,6 +1197,9 @@ export default function CombatRunner({
                         {status === 'critical' && ' ☠'}
                       </span>
                       <span className="combatant-stat-sub">/ {c.maxHp}</span>
+                      {(c.tempHp || 0) > 0 && (
+                        <span style={{ fontSize: 9, color: '#3b82f6', fontFamily: 'DM Mono, monospace', lineHeight: 1 }}>+{c.tempHp}t</span>
+                      )}
                     </div>
                     <div className="combatant-stat">
                       <span className="combatant-stat-label">AC</span>
