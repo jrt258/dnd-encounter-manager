@@ -94,7 +94,8 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
     if (effectiveEditing === 'new') {
       setMonsters(prev => [...prev, { ...data, id: Date.now().toString() }]);
     } else if (effectiveEditing?.isDefault) {
-      setMonsters(prev => [...prev, { ...data, id: Date.now().toString(), isDefault: false }]);
+      // Save with the original default ID so App.jsx's merge logic suppresses the default entry
+      setMonsters(prev => [...prev, { ...data, id: effectiveEditing.id, isDefault: false }]);
     } else {
       setMonsters(prev => prev.map(m => m.id === effectiveEditing.id ? { ...effectiveEditing, ...data } : m));
     }
