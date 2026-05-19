@@ -77,6 +77,16 @@ export default function App() {
   const [encounters, setEncounters]               = useLocalStorage('dnd_encounters', []);
   const [activeEncounterId, setActiveEncounterId] = useLocalStorage('dnd_active_encounter', null);
 
+  // ── Combat state lifted here so it persists when switching tabs ───────────
+  const [combatScreen, setCombatScreen]                       = useLocalStorage('dnd_combat_screen', 'select');
+  const [combatSelectedEncounter, setCombatSelectedEncounter] = useLocalStorage('dnd_combat_encounter', null);
+  const [combatInitiativeMode, setCombatInitiativeMode]       = useLocalStorage('dnd_combat_init_mode', 'individual');
+  const [combatPending, setCombatPending]                     = useLocalStorage('dnd_combat_pending', []);
+  const [combatants, setCombatants]                           = useLocalStorage('dnd_combat_combatants', []);
+  const [combatRound, setCombatRound]                         = useLocalStorage('dnd_combat_round', 1);
+  const [combatTurnIdx, setCombatTurnIdx]                     = useLocalStorage('dnd_combat_turn', 0);
+  const [combatLog, setCombatLog]                             = useLocalStorage('dnd_combat_log', []);
+
   // Lifted editing state for page header buttons
   const [monsterEditing, setMonsterEditing] = useState(null);
   const [playerEditing, setPlayerEditing]   = useState(null);
@@ -159,9 +169,30 @@ export default function App() {
               setActiveEncounterId={setActiveEncounterId}
             />
           )}
-          {tab === 'combat' && (
-            <CombatRunner encounters={encounters} />
-          )}
+          {/* CombatRunner is always mounted; hidden via CSS when not on combat tab
+              so all its state (and lifted state) survives tab switches */}
+          <div style={{ display: tab === 'combat' ? 'block' : 'none' }}>
+            <CombatRunner
+              encounters={encounters}
+              // Lifted combat state
+              screen={combatScreen}
+              setScreen={setCombatScreen}
+              selectedEncounter={combatSelectedEncounter}
+              setSelectedEncounter={setCombatSelectedEncounter}
+              initiativeMode={combatInitiativeMode}
+              setInitiativeMode={setCombatInitiativeMode}
+              pendingCombatants={combatPending}
+              setPendingCombatants={setCombatPending}
+              combatants={combatants}
+              setCombatants={setCombatants}
+              round={combatRound}
+              setRound={setCombatRound}
+              turnIdx={combatTurnIdx}
+              setTurnIdx={setCombatTurnIdx}
+              log={combatLog}
+              setLog={setCombatLog}
+            />
+          </div>
         </div>
       </div>
     </div>
