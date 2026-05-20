@@ -81,7 +81,20 @@ export default function App() {
   const [monsterEditing, setMonsterEditing] = useState(null);
   const [playerEditing, setPlayerEditing]   = useState(null);
 
+  // ── Combat state lifted here so it persists across tab switches ──────────
+  const [combatScreen, setCombatScreen]               = useState('select');
+  const [combatSelectedEncounter, setCombatSelectedEncounter] = useState(null);
+  const [combatInitiativeMode, setCombatInitiativeMode]       = useState('individual');
+  const [combatPendingCombatants, setCombatPendingCombatants] = useState([]);
+  const [combatants, setCombatants]                   = useState([]);
+  const [combatRound, setCombatRound]                 = useState(1);
+  const [combatTurnIdx, setCombatTurnIdx]             = useState(0);
+  const [combatLog, setCombatLog]                     = useState([]);
+
   const currentNav = NAV_ITEMS.find(n => n.id === tab);
+
+  // Show a "live combat" indicator badge on the nav item
+  const combatActive = combatScreen === 'combat';
 
   return (
     <div className="app-shell">
@@ -101,6 +114,16 @@ export default function App() {
             >
               {item.icon}
               <span className="nav-label">{item.label}</span>
+              {item.id === 'combat' && combatActive && (
+                <span style={{
+                  marginLeft: 'auto',
+                  width: 8, height: 8,
+                  borderRadius: '50%',
+                  background: 'var(--green)',
+                  flexShrink: 0,
+                  boxShadow: '0 0 0 2px var(--accent-bg)',
+                }} title="Combat in progress" />
+              )}
             </button>
           ))}
         </nav>
@@ -159,9 +182,28 @@ export default function App() {
               setActiveEncounterId={setActiveEncounterId}
             />
           )}
-          {tab === 'combat' && (
-            <CombatRunner encounters={encounters} monsters={monsters} />
-          )}
+          {/* Always mount CombatRunner but hide when not on combat tab — preserves state */}
+          <div style={{ display: tab === 'combat' ? 'block' : 'none' }}>
+            <CombatRunner
+              encounters={encounters}
+              screen={combatScreen}
+              setScreen={setCombatScreen}
+              selectedEncounter={combatSelectedEncounter}
+              setSelectedEncounter={setCombatSelectedEncounter}
+              initiativeMode={combatInitiativeMode}
+              setInitiativeMode={setCombatInitiativeMode}
+              pendingCombatants={combatPendingCombatants}
+              setPendingCombatants={setCombatPendingCombatants}
+              combatants={combatants}
+              setCombatants={setCombatants}
+              round={combatRound}
+              setRound={setCombatRound}
+              turnIdx={combatTurnIdx}
+              setTurnIdx={setCombatTurnIdx}
+              log={combatLog}
+              setLog={setCombatLog}
+            />
+          </div>
         </div>
       </div>
     </div>

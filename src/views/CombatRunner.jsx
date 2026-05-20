@@ -22,8 +22,17 @@ const CONDITIONS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36); }
 function rollD20() { return Math.floor(Math.random() * 20) + 1; }
+
+function rollDice(expr) {
+  const m = expr?.match(/(\d+)d(\d+)([+-]\d+)?/i);
+  if (!m) return parseInt(expr) || 0;
+  let total = 0;
+  for (let i = 0; i < parseInt(m[1]); i++)
+    total += Math.floor(Math.random() * parseInt(m[2])) + 1;
+  if (m[3]) total += parseInt(m[3]);
+  return Math.max(1, total);
+}
 
 function hpStatus(currentHp, maxHp) {
   const pct = maxHp > 0 ? currentHp / maxHp : 0;
@@ -32,53 +41,28 @@ function hpStatus(currentHp, maxHp) {
   if (pct < 0.50) return 'bloody';
   return 'healthy';
 }
+
 function hpStatusClass(status) {
   if (status === 'healthy')  return 'hp-healthy';
   if (status === 'bloody')   return 'hp-bloody';
   if (status === 'critical') return 'hp-critical';
   return '';
 }
+
 function hpBarColor(status) {
   if (status === 'healthy') return 'var(--green)';
   if (status === 'bloody')  return 'var(--orange)';
   return 'var(--accent)';
 }
+
 function dexMod(abilities) {
   return abilities ? Math.floor((abilities.dex - 10) / 2) : 0;
 }
+
 function clampInit(val) {
   const n = parseInt(val);
   if (isNaN(n)) return '';
   return String(Math.max(1, n));
-}
-
-function buildCombatant(m, index, groupId) {
-  const count = 1; // building one at a time
-  return {
-    id: uid(),
-    sourceId: groupId ?? m.id,
-    groupKey: groupId ?? m.id,
-    type: 'monster',
-    name: index != null ? `${m.name} ${index}` : m.name,
-    baseName: m.name,
-    maxHp: m.hp ?? 10,
-    damage: 0,
-    tempHp: 0,
-    ac: m.ac ?? 10,
-    speed: m.speed ?? 30,
-    initiative: null,
-    initMod: dexMod(m.abilities) + (m.initiativeMod ?? 0),
-    conditions: [],
-    spellSlots: m.spellSlots ? JSON.parse(JSON.stringify(m.spellSlots)) : null,
-    usedSlots: {},
-    attacks: m.attacks ?? [],
-    spells: m.spells ?? [],
-    notes: m.notes ?? '',
-    abilities: m.abilities ?? null,
-    expanded: false,
-    cr: m.cr,
-    addedMidCombat: true, // won't act until next round
-  };
 }
 
 function buildCombatants(entries) {
@@ -98,7 +82,7 @@ function buildCombatants(entries) {
         speed: p.speed ?? 30,
         initiative: null,
         initMod: dexMod(p.abilities) + (p.initiativeMod ?? 0),
-        conditions: [],
+        conditions: [],          // now: array of { id, turns } objects
         spellSlots: p.spellSlots ? JSON.parse(JSON.stringify(p.spellSlots)) : null,
         usedSlots: {},
         attacks: p.attacks ?? [],
@@ -112,6 +96,7 @@ function buildCombatants(entries) {
       const count = entry.count || 1;
       const groupInitMod = dexMod(m.abilities) + (m.initiativeMod ?? 0);
       for (let i = 0; i < count; i++) {
+        const maxHp = m.hpFormula ? rollDice(m.hpFormula) : (m.hp ?? 10);
         result.push({
           id: `${entry.id}-${i}`,
           sourceId: entry.sourceId,
@@ -119,7 +104,7 @@ function buildCombatants(entries) {
           type: 'monster',
           name: count > 1 ? `${m.name} ${i + 1}` : m.name,
           baseName: m.name,
-          maxHp: m.hp ?? 10,
+          maxHp,
           damage: 0,
           tempHp: 0,
           ac: m.ac ?? 10,
@@ -144,30 +129,70 @@ function buildCombatants(entries) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+// condition is now { id, turns } — turns === null means indefinite
 function ConditionChip({ condition, onRemove }) {
-  const def = CONDITIONS.find(c => c.id === condition) ?? { label: condition, color: '#666', bg: '#eee' };
+  const def = CONDITIONS.find(c => c.id === condition.id) ?? { label: condition.id, color: '#666', bg: '#eee' };
+  const label = condition.turns != null ? `${def.label} (${condition.turns}t)` : def.label;
   return (
     <span className="condition-chip" style={{ background: def.bg, color: def.color }} title={def.label}>
-      {def.label}
+      {label}
       {onRemove && (
         <span style={{ marginLeft: 2, cursor: 'pointer', opacity: 0.7, fontSize: 10 }}
-          onClick={e => { e.stopPropagation(); onRemove(condition); }}>×</span>
+          onClick={e => { e.stopPropagation(); onRemove(condition.id); }}>×</span>
       )}
     </span>
   );
 }
 
+// ── Condition toggle grid with per-condition turn input ───────────────────────
 function ConditionToggleGrid({ active, onToggle }) {
+  // pendingTurns: track local turn input for each condition
+  const [pendingTurns, setPendingTurns] = useState({});
+
+  function getActive(condId) {
+    return active.find(c => c.id === condId) ?? null;
+  }
+
   return (
-    <div className="condition-toggle-grid">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {CONDITIONS.map(c => {
-        const isActive = active.includes(c.id);
+        const activeEntry = getActive(c.id);
+        const isActive = !!activeEntry;
+        const pending = pendingTurns[c.id] ?? '';
+
         return (
-          <button key={c.id} className={`condition-toggle${isActive ? ' active' : ''}`}
-            style={isActive ? { background: c.color, borderColor: c.color } : {}}
-            onClick={() => onToggle(c.id)}>
-            {c.label}
-          </button>
+          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              className={`condition-toggle${isActive ? ' active' : ''}`}
+              style={isActive ? { background: c.color, borderColor: c.color, flex: 1 } : { flex: 1 }}
+              onClick={() => {
+                const turns = pending !== '' ? parseInt(pending) : null;
+                onToggle(c.id, isActive ? null : turns);
+                if (!isActive) setPendingTurns(prev => ({ ...prev, [c.id]: '' }));
+              }}
+            >
+              {c.label}
+              {isActive && activeEntry.turns != null && (
+                <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.85 }}>({activeEntry.turns}t)</span>
+              )}
+            </button>
+            {!isActive && (
+              <input
+                type="number"
+                min={1}
+                placeholder="turns"
+                value={pending}
+                onChange={e => setPendingTurns(prev => ({ ...prev, [c.id]: e.target.value }))}
+                style={{ width: 56, padding: '3px 6px', fontSize: 11, textAlign: 'center' }}
+                title="Optional: how many turns this condition lasts"
+              />
+            )}
+            {isActive && (
+              <div style={{ width: 56, fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>
+                {activeEntry.turns != null ? `${activeEntry.turns}t` : '∞'}
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
@@ -188,12 +213,11 @@ function SlotPips({ total, used, onToggle }) {
 function QuickHP({ label, color, sign, c, onUpdate }) {
   const [val, setVal] = useState('');
   return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+    <div style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
       <input type="number" min={0} placeholder="0" value={val}
         onChange={e => setVal(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') { const amt = parseInt(val)||0; if(!amt) return; if(sign<0) onUpdate(c.id,{damage:Math.min(c.maxHp,c.damage+amt)}); else onUpdate(c.id,{damage:Math.max(0,c.damage-amt)}); setVal(''); }}}
         style={{ flex: 1, padding: '5px 8px', fontSize: 13 }} />
-      <button className="btn btn-ghost btn-sm" style={{ color, flexShrink: 0, minWidth: 68 }}
+      <button className="btn btn-ghost btn-sm" style={{ color, flexShrink: 0 }}
         onClick={() => {
           const amt = parseInt(val) || 0;
           if (amt === 0) return;
@@ -202,27 +226,6 @@ function QuickHP({ label, color, sign, c, onUpdate }) {
           setVal('');
         }}>
         {label}
-      </button>
-    </div>
-  );
-}
-
-function QuickTempHP({ c, onUpdate }) {
-  const [val, setVal] = useState('');
-  return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-      <input type="number" min={0} placeholder="0" value={val}
-        onChange={e => setVal(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') { const amt = parseInt(val)||0; if(!amt) return; onUpdate(c.id, { tempHp: (c.tempHp??0)+amt }); setVal(''); }}}
-        style={{ flex: 1, padding: '5px 8px', fontSize: 13 }} />
-      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--blue, #3b82f6)', flexShrink: 0, minWidth: 68 }}
-        onClick={() => {
-          const amt = parseInt(val) || 0;
-          if (amt === 0) return;
-          onUpdate(c.id, { tempHp: (c.tempHp ?? 0) + amt });
-          setVal('');
-        }}>
-        Temp HP
       </button>
     </div>
   );
@@ -258,22 +261,43 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
                   {currentHp}
                 </div>
               </div>
-              <div className="hp-edit-field">
-                <span className="hp-edit-label">AC</span>
-                <input type="number" className="hp-edit-input" min={1} value={c.ac}
-                  onChange={e => onUpdate(c.id, { ac: parseInt(e.target.value) || 10 })} />
-              </div>
             </div>
-
-            {/* Stacked quick-action rows: Damage / Heal / Temp HP */}
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
               <QuickHP label="Damage" color="var(--accent)" sign={-1} c={c} onUpdate={onUpdate} />
               <QuickHP label="Heal"   color="var(--green)"  sign={+1} c={c} onUpdate={onUpdate} />
-              <QuickTempHP c={c} onUpdate={onUpdate} />
             </div>
           </div>
 
-          {/* Ability scores — top of left column, per original */}
+          {/* AC — moved above Initiative */}
+          <div className="expand-section" style={{ marginTop: 14 }}>
+            <div className="expand-section-title">Armor Class</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                type="number"
+                min={1}
+                value={c.ac}
+                onChange={e => onUpdate(c.id, { ac: parseInt(e.target.value) || 10 })}
+                style={{ width: 72, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 500 }}
+              />
+            </div>
+          </div>
+
+          {/* Initiative — read-only */}
+          <div className="expand-section" style={{ marginTop: 14 }}>
+            <div className="expand-section-title">Initiative</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 22, fontWeight: 500, color: 'var(--text)' }}>
+                {c.initiative ?? '—'}
+              </span>
+              {c.initMod !== 0 && (
+                <span style={{ fontSize: 12, color: 'var(--text3)' }}>
+                  (mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod})
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Ability scores */}
           {c.abilities && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Ability Scores</div>
@@ -292,27 +316,12 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
               </div>
             </div>
           )}
-
-          {/* Initiative — read-only display, no reroll */}
-          <div className="expand-section" style={{ marginTop: 14 }}>
-            <div className="expand-section-title">Initiative</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontFamily: 'DM Mono, monospace', fontSize: 22, fontWeight: 500, color: 'var(--text)' }}>
-                {c.initiative ?? '—'}
-              </span>
-              {c.initMod !== 0 && (
-                <span style={{ fontSize: 12, color: 'var(--text3)' }}>
-                  (mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod})
-                </span>
-              )}
-            </div>
-          </div>
         </div>
 
         <div>
           <div className="expand-section">
             <div className="expand-section-title">Conditions</div>
-            <ConditionToggleGrid active={c.conditions} onToggle={id => onToggleCondition(c.id, id)} />
+            <ConditionToggleGrid active={c.conditions} onToggle={(condId, turns) => onToggleCondition(c.id, condId, turns)} />
           </div>
 
           {c.attacks?.length > 0 && (
@@ -360,7 +369,7 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
   );
 }
 
-// ─── Initiative input field (min 1) ──────────────────────────────────────────
+// ─── Initiative input field ───────────────────────────────────────────────────
 
 function InitInput({ value, onChange, style = {} }) {
   return (
@@ -380,546 +389,555 @@ function InitInput({ value, onChange, style = {} }) {
   );
 }
 
-// ─── Action Modal — 3-step attack flow ───────────────────────────────────────
+// ─── Action Modal — 3-step attack/heal flow ───────────────────────────────────
 
 function ActionModal({ attacker, combatants, onApply, onClose }) {
   const [step, setStep]           = useState('action');
   const [selectedAction, setSelectedAction] = useState(null);
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [damageVal, setDamageVal] = useState('');
+  const [healVal, setHealVal]     = useState('');
+  const [tempHpVal, setTempHpVal] = useState('');
   const [rolledBreakdown, setRolledBreakdown] = useState('');
+  // Condition flow
+  const [conditionId, setConditionId] = useState('');
+  const [conditionTurns, setConditionTurns] = useState('');
 
   const attacks = attacker.attacks ?? [];
   const spells  = (attacker.spells ?? []).filter(s => s.effect || s.damage);
   const hasActions = attacks.length > 0 || spells.length > 0;
-  const targets = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0);
+
+  const players  = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0 && c.type === 'player');
+  const monsters = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0 && c.type === 'monster');
+  const targets  = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0);
 
   function rollDamageExpr(expr) {
     if (!expr) return { total: 0, breakdown: '0' };
     const match = expr.trim().match(/^(\d*)d(\d+)([+-]\d+)?/i);
-    if (!match) { const flat = parseInt(expr)||0; return { total: flat, breakdown: String(flat) }; }
-    const count = parseInt(match[1]||'1'), sides = parseInt(match[2]), mod = parseInt(match[3]||'0');
-    const rolls = Array.from({ length: count }, () => Math.floor(Math.random()*sides)+1);
-    const total = rolls.reduce((a,b)=>a+b,0)+mod;
-    const rollStr = count>1?`[${rolls.join('+')}]`:String(rolls[0]);
-    const breakdown = mod!==0?`${rollStr}${mod>0?'+':''}${mod}`:rollStr;
-    return { total: Math.max(0,total), breakdown };
+    if (!match) {
+      const flat = parseInt(expr) || 0;
+      return { total: flat, breakdown: String(flat) };
+    }
+    const count  = parseInt(match[1] || '1');
+    const sides  = parseInt(match[2]);
+    const mod    = parseInt(match[3] || '0');
+    const rolls  = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
+    const total  = rolls.reduce((a, b) => a + b, 0) + mod;
+    const rollStr = count > 1 ? `[${rolls.join('+')}]` : String(rolls[0]);
+    const breakdown = mod !== 0 ? `${rollStr}${mod > 0 ? '+' : ''}${mod}` : rollStr;
+    return { total: Math.max(0, total), breakdown };
   }
 
   function handleRoll() {
     const expr = selectedAction?.damage ?? selectedAction?.effect ?? '';
     const { total, breakdown } = rollDamageExpr(expr);
-    setDamageVal(String(total)); setRolledBreakdown(breakdown);
+    setDamageVal(String(total));
+    setRolledBreakdown(breakdown);
   }
 
   function handleApply() {
-    const dmg = parseInt(damageVal);
-    if (!dmg || !selectedTarget) return;
-    onApply(selectedTarget.id, dmg, selectedAction, attacker);
+    const dmg    = parseInt(damageVal) || 0;
+    const heal   = parseInt(healVal) || 0;
+    const tmpHp  = parseInt(tempHpVal) || 0;
+    const turns  = conditionId ? (conditionTurns !== '' ? parseInt(conditionTurns) : null) : undefined;
+    if (!selectedTarget) return;
+    onApply(selectedTarget.id, dmg, heal, tmpHp, selectedAction, attacker, conditionId || null, turns ?? null);
     onClose();
   }
 
   const stepTitle = {
     action: `${attacker.name} — Choose Action`,
     target: `${selectedAction?.name ?? 'Action'} — Choose Target`,
-    damage: `${selectedAction?.name ?? 'Action'} → ${selectedTarget?.name ?? '?'} — Set Damage`,
-  };
+    damage: `${selectedAction?.name ?? 'Action'} → ${selectedTarget?.name ?? '?'} — Resolve`,
+  }[step];
 
-  return (
-    <div style={{ position:'fixed',inset:0,zIndex:200,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center' }} onClick={onClose}>
-      <div style={{ background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',width:380,maxHeight:'80vh',overflow:'auto',padding:20,boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }} onClick={e=>e.stopPropagation()}>
-        <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16 }}>
-          <div style={{ fontSize:14,fontWeight:600,color:'var(--text)' }}>{stepTitle[step]}</div>
-          <button className="btn-icon" onClick={onClose}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
+  // ─── Target group renderer ────────────────────────────────────────────────
+  function TargetButton({ t }) {
+    const tHp = t.maxHp - t.damage;
+    const tStatus = hpStatus(tHp, t.maxHp);
+    return (
+      <button key={t.id}
+        onClick={() => { setSelectedTarget(t); setDamageVal(''); setHealVal(''); setTempHpVal(''); setRolledBreakdown(''); setStep('damage'); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border)', background: 'var(--surface)',
+          cursor: 'pointer', textAlign: 'left', width: '100%',
+          transition: 'background 0.1s',
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+      >
+        <div className={`combatant-dot ${t.type === 'player' ? 'dot-player' : 'dot-monster'}`} style={{ flexShrink: 0 }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{t.name}</div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+            AC {t.ac} · HP {tHp}/{t.maxHp}
+            {t.conditions.length > 0 && ` · ${t.conditions.map(c => c.id).join(', ')}`}
+          </div>
         </div>
-
-        {step === 'action' && (
-          <div>
-            {!hasActions && (
-              <div style={{ marginBottom:12 }}>
-                <div style={{ fontSize:12,color:'var(--text3)',marginBottom:8 }}>No defined actions — enter custom damage below.</div>
-                <div style={{ display:'flex',gap:8 }}>
-                  <input type="number" min={0} placeholder="Damage" value={damageVal} onChange={e=>setDamageVal(e.target.value)} style={{ flex:1,padding:'6px 10px',fontSize:13 }}/>
-                  <button className="btn btn-accent" onClick={()=>setStep('target')} disabled={!damageVal||parseInt(damageVal)<=0}>Next →</button>
-                </div>
-              </div>
-            )}
-            {attacks.length > 0 && (
-              <div style={{ marginBottom:12 }}>
-                <div style={{ fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text3)',marginBottom:6 }}>Attacks</div>
-                {attacks.map((atk,i) => (
-                  <button key={i} style={{ display:'block',width:'100%',textAlign:'left',padding:'8px 12px',background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',marginBottom:4,cursor:'pointer' }}
-                    onClick={()=>{ setSelectedAction(atk); setStep('target'); }}>
-                    <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center' }}>
-                      <span style={{ fontSize:13,fontWeight:600,color:'var(--text)' }}>{atk.name}</span>
-                      <span style={{ fontSize:12,fontFamily:'DM Mono, monospace',color:'var(--text2)' }}>
-                        {atk.hitBonus!==undefined?`${atk.hitBonus>=0?'+':''}${atk.hitBonus} to hit`:''}{atk.damage?`  ${atk.damage}`:''}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-            {spells.length > 0 && (
-              <div>
-                <div style={{ fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text3)',marginBottom:6 }}>Spells</div>
-                {spells.map((sp,i) => (
-                  <button key={i} style={{ display:'block',width:'100%',textAlign:'left',padding:'8px 12px',background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',marginBottom:4,cursor:'pointer' }}
-                    onClick={()=>{ setSelectedAction(sp); setStep('target'); }}>
-                    <div style={{ fontSize:13,fontWeight:600,color:'var(--text)' }}>{sp.name}</div>
-                    {sp.effect && <div style={{ fontSize:11,color:'var(--text3)',marginTop:1 }}>{sp.effect}</div>}
-                  </button>
-                ))}
-              </div>
-            )}
+        <div style={{ width: 60 }}>
+          <div className="hp-bar-track">
+            <div className="hp-bar-fill" style={{ width: `${Math.max(0, tHp / t.maxHp) * 100}%`, background: hpBarColor(tStatus) }} />
           </div>
-        )}
-
-        {step === 'target' && (
-          <div>
-            <button className="btn btn-ghost btn-sm" style={{ marginBottom:12 }} onClick={()=>setStep('action')}>← Back</button>
-            {targets.length === 0
-              ? <div style={{ color:'var(--text3)',fontSize:13 }}>No valid targets.</div>
-              : targets.map(t => {
-                  const hp = t.maxHp - t.damage;
-                  const st = hpStatus(hp, t.maxHp);
-                  return (
-                    <button key={t.id} style={{ display:'block',width:'100%',textAlign:'left',padding:'8px 12px',background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',marginBottom:4,cursor:'pointer' }}
-                      onClick={()=>{ setSelectedTarget(t); setStep('damage'); }}>
-                      <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4 }}>
-                        <span style={{ fontSize:13,fontWeight:600,color:'var(--text)' }}>{t.name}</span>
-                        <span style={{ fontSize:12,fontFamily:'DM Mono, monospace',color:hpBarColor(st) }}>{hp}/{t.maxHp} HP</span>
-                      </div>
-                      <div style={{ height:4,background:'var(--border)',borderRadius:2,overflow:'hidden' }}>
-                        <div style={{ height:'100%',width:`${Math.max(0,Math.min(1,hp/t.maxHp))*100}%`,background:hpBarColor(st),transition:'width 0.2s' }}/>
-                      </div>
-                    </button>
-                  );
-                })
-            }
-          </div>
-        )}
-
-        {step === 'damage' && (
-          <div>
-            <button className="btn btn-ghost btn-sm" style={{ marginBottom:12 }} onClick={()=>setStep('target')}>← Back</button>
-            {selectedAction?.damage && (
-              <div style={{ marginBottom:10 }}>
-                <div style={{ fontSize:12,color:'var(--text3)',marginBottom:6 }}>
-                  Damage formula: <span style={{ fontFamily:'DM Mono, monospace',color:'var(--text2)' }}>{selectedAction.damage}</span>
-                </div>
-                <button className="btn btn-ghost btn-sm" onClick={handleRoll}>🎲 Roll {selectedAction.damage}</button>
-                {rolledBreakdown && <span style={{ marginLeft:8,fontSize:12,fontFamily:'DM Mono, monospace',color:'var(--text2)' }}>= {rolledBreakdown}</span>}
-              </div>
-            )}
-            <div style={{ display:'flex',gap:8,marginTop:8 }}>
-              <input type="number" min={0} placeholder="Damage amount" value={damageVal} onChange={e=>setDamageVal(e.target.value)} style={{ flex:1,padding:'6px 10px',fontSize:13 }}/>
-              <button className="btn btn-accent" onClick={handleApply} disabled={!damageVal||parseInt(damageVal)<=0||!selectedTarget}>Apply</button>
-            </div>
-            {selectedAction?.notes && <div style={{ marginTop:10,fontSize:12,color:'var(--text3)',lineHeight:1.5 }}>{selectedAction.notes}</div>}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Add Monster to Combat Modal ─────────────────────────────────────────────
-
-function AddMonsterModal({ monsters, currentCombatants, onAdd, onClose }) {
-  const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState(null);
-  const [initiative, setInitiative] = useState('');
-
-  const filtered = monsters.filter(m =>
-    m.name.toLowerCase().includes(search.toLowerCase())
-  );
-
-  // Count how many of this monster are already in combat to auto-number
-  function nextIndex(monster) {
-    const existing = currentCombatants.filter(c => c.baseName === monster.name || c.name === monster.name);
-    return existing.length + 1;
-  }
-
-  function handleAdd() {
-    if (!selected || !initiative || parseInt(initiative) < 1) return;
-    const idx = nextIndex(selected);
-    const combatant = buildCombatant(
-      selected,
-      idx > 1 ? idx : null,
-      uid()
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
     );
-    combatant.initiative = parseInt(initiative);
-    onAdd(combatant);
-    onClose();
   }
 
   return (
-    <div style={{ position:'fixed',inset:0,zIndex:200,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center' }} onClick={onClose}>
-      <div style={{ background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'var(--radius)',width:440,maxHeight:'80vh',display:'flex',flexDirection:'column',boxShadow:'0 8px 32px rgba(0,0,0,0.2)' }} onClick={e=>e.stopPropagation()}>
-
-        {/* Header */}
-        <div style={{ padding:'16px 20px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0 }}>
-          <div style={{ fontSize:14,fontWeight:600,color:'var(--text)' }}>Add Monster to Combat</div>
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 480 }}>
+        <div className="modal-header">
+          <span className="modal-title">{stepTitle}</span>
           <button className="btn-icon" onClick={onClose}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
 
-        {/* Search */}
-        <div style={{ padding:'12px 20px',borderBottom:'1px solid var(--border)',flexShrink:0 }}>
-          <div className="search-bar">
-            <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-            </svg>
-            <input type="text" placeholder="Search monsters…" value={search} onChange={e=>{ setSearch(e.target.value); setSelected(null); }} autoFocus/>
-          </div>
-        </div>
+        <div className="modal-body">
 
-        {/* Monster list */}
-        <div style={{ flex:1,overflowY:'auto',padding:'8px 0' }}>
-          {filtered.length === 0 && (
-            <div style={{ padding:'20px',textAlign:'center',color:'var(--text3)',fontSize:13 }}>No monsters found.</div>
-          )}
-          {filtered.map(m => (
-            <div key={m.id}
-              onClick={() => setSelected(selected?.id === m.id ? null : m)}
-              style={{
-                padding:'10px 20px',cursor:'pointer',display:'flex',alignItems:'center',gap:12,
-                background: selected?.id === m.id ? 'var(--accent-bg)' : 'transparent',
-                borderLeft: selected?.id === m.id ? '3px solid var(--accent)' : '3px solid transparent',
-                transition:'background 0.1s',
-              }}>
-              <div className="combatant-dot dot-monster" style={{ flexShrink:0 }}/>
-              <div style={{ flex:1,minWidth:0 }}>
-                <div style={{ fontSize:13,fontWeight:600,color:'var(--text)' }}>{m.name}</div>
-                <div style={{ fontSize:11,color:'var(--text3)' }}>
-                  CR {m.cr ?? '—'} · HP {m.hp ?? '—'} · AC {m.ac ?? '—'} · {m.type}
+          {/* ── Step 1: Action picker ── */}
+          {step === 'action' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {attacks.length > 0 && (
+                <>
+                  <div className="section-heading" style={{ marginTop: 0 }}>Attacks</div>
+                  {attacks.map((atk, i) => (
+                    <button key={i} onClick={() => { setSelectedAction({ ...atk, actionType: 'attack' }); setStep('target'); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border)', background: 'var(--surface)',
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{atk.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+                          {atk.hitBonus !== undefined && `${atk.hitBonus >= 0 ? '+' : ''}${atk.hitBonus} to hit`}
+                          {atk.hitBonus !== undefined && atk.damage && ' · '}
+                          {atk.damage && `${atk.damage} ${atk.damageType ?? ''}`}
+                        </div>
+                      </div>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {spells.length > 0 && (
+                <>
+                  <div className="section-heading" style={{ marginTop: attacks.length > 0 ? 8 : 0 }}>
+                    {hasActions ? 'Other' : 'Actions'}
+                  </div>
+                  {spells.map((sp, i) => (
+                    <button key={i} onClick={() => { setSelectedAction({ ...sp, actionType: 'spell' }); setStep('target'); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border)', background: 'var(--surface)',
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>
+                          {sp.effect ?? sp.damage ?? ''}
+                        </div>
+                      </div>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {/* Custom / Other */}
+              <div className="section-heading" style={{ marginTop: (attacks.length > 0 || spells.length > 0) ? 8 : 0 }}>Other</div>
+              <button onClick={() => { setSelectedAction({ name: 'Custom', actionType: 'custom', damage: '' }); setStep('target'); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                  border: '1px dashed var(--border-strong)', background: 'var(--surface)',
+                  cursor: 'pointer', textAlign: 'left', width: '100%',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Custom / Other</div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>Unarmed strike, special ability, or manual entry</div>
                 </div>
-              </div>
-              {selected?.id === m.id && (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"/>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                  <polyline points="9 18 15 12 9 6" />
                 </svg>
+              </button>
+
+              {/* Unlisted */}
+              <button onClick={() => { setSelectedAction({ name: 'Unlisted', actionType: 'unlisted', damage: '' }); setStep('target'); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                  border: '1px dashed var(--border-strong)', background: 'var(--surface)',
+                  cursor: 'pointer', textAlign: 'left', width: '100%',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Unlisted</div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>Bonus action, reaction, legendary action, or other</div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* ── Step 2: Target picker — separated by type ── */}
+          {step === 'target' && (
+            <div>
+              <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12 }} onClick={() => setStep('action')}>← Back</button>
+              {targets.length === 0 ? (
+                <div className="empty-state" style={{ padding: 24 }}>No valid targets — all other combatants are down.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {players.length > 0 && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: 0 }}>Players</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {players.map(t => <TargetButton key={t.id} t={t} />)}
+                      </div>
+                    </>
+                  )}
+                  {monsters.length > 0 && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: players.length > 0 ? 4 : 0 }}>Monsters</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {monsters.map(t => <TargetButton key={t.id} t={t} />)}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
-          ))}
-        </div>
-
-        {/* Initiative + confirm */}
-        <div style={{ padding:'16px 20px',borderTop:'1px solid var(--border)',flexShrink:0 }}>
-          {selected ? (
-            <div style={{ marginBottom:12,padding:'10px 12px',background:'var(--surface2)',borderRadius:'var(--radius-sm)',fontSize:12,color:'var(--text2)' }}>
-              Adding: <strong style={{ color:'var(--text)' }}>{selected.name}</strong> · HP {selected.hp} · AC {selected.ac} · CR {selected.cr ?? '—'}
-            </div>
-          ) : (
-            <div style={{ marginBottom:12,fontSize:12,color:'var(--text3)' }}>Select a monster above to continue.</div>
           )}
-          <div style={{ display:'flex',gap:8,alignItems:'center' }}>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text3)',marginBottom:4 }}>Initiative</div>
-              <div style={{ display:'flex',gap:6,alignItems:'center' }}>
-                <InitInput
-                  value={initiative}
-                  onChange={setInitiative}
-                  style={{ flex:1, width:'auto' }}
-                />
-                {selected && (
-                  <button className="btn btn-ghost btn-sm" style={{ flexShrink:0 }}
-                    onClick={() => setInitiative(String(Math.max(1, rollD20() + (selected.initiativeMod ?? dexMod(selected.abilities)))))}>
-                    🎲 Roll
-                  </button>
+
+          {/* ── Step 3: Resolve (damage / heal / temp HP / condition) ── */}
+          {step === 'damage' && selectedTarget && (
+            <div>
+              <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={() => setStep('target')}>← Back</button>
+
+              {/* Summary */}
+              <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 16,
+                display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className={`combatant-dot ${selectedTarget.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{selectedTarget.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace' }}>
+                    AC {selectedTarget.ac} · HP {selectedTarget.maxHp - selectedTarget.damage}/{selectedTarget.maxHp}
+                  </div>
+                </div>
+              </div>
+
+              {/* Damage row */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', marginBottom: 6 }}>
+                  Damage
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    value={damageVal}
+                    onChange={e => setDamageVal(e.target.value)}
+                    style={{ flex: 1, padding: '8px 12px', fontSize: 20, fontFamily: 'DM Mono, monospace', fontWeight: 500, textAlign: 'center' }}
+                  />
+                  {selectedAction?.damage && (
+                    <button className="btn btn-ghost" onClick={handleRoll} style={{ flexShrink: 0 }}>
+                      🎲 Roll {selectedAction.damage}
+                    </button>
+                  )}
+                </div>
+                {rolledBreakdown && (
+                  <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 4 }}>
+                    = {rolledBreakdown}
+                  </div>
                 )}
               </div>
+
+              {/* Healing row */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--green)', marginBottom: 6 }}>
+                  Healing
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="0"
+                  value={healVal}
+                  onChange={e => setHealVal(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 18, fontFamily: 'DM Mono, monospace', fontWeight: 500, textAlign: 'center' }}
+                />
+              </div>
+
+              {/* Temp HP row */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--blue)', marginBottom: 6 }}>
+                  Add Temp HP
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="0"
+                  value={tempHpVal}
+                  onChange={e => setTempHpVal(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 18, fontFamily: 'DM Mono, monospace', fontWeight: 500, textAlign: 'center' }}
+                />
+              </div>
+
+              {/* Apply condition */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', marginBottom: 6 }}>
+                  Apply Condition (optional)
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select value={conditionId} onChange={e => setConditionId(e.target.value)} style={{ flex: 1 }}>
+                    <option value="">— None —</option>
+                    {CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="turns"
+                    value={conditionTurns}
+                    onChange={e => setConditionTurns(e.target.value)}
+                    style={{ width: 72, textAlign: 'center', fontSize: 13 }}
+                    title="How many turns it lasts (leave blank for indefinite)"
+                  />
+                </div>
+              </div>
+
+              <button
+                className="btn btn-accent btn-full"
+                onClick={handleApply}
+                disabled={!damageVal && !healVal && !tempHpVal && !conditionId}
+              >
+                Apply
+              </button>
             </div>
-            <button
-              className="btn btn-accent"
-              style={{ alignSelf:'flex-end', opacity: selected && initiative && parseInt(initiative)>=1 ? 1 : 0.5 }}
-              disabled={!selected || !initiative || parseInt(initiative) < 1}
-              onClick={handleAdd}>
-              Add to Combat
-            </button>
-          </div>
-          <div style={{ marginTop:8,fontSize:11,color:'var(--text3)' }}>
-            This monster will be inserted into the initiative order but will not act until next round.
-          </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Screen 1: Encounter Select ───────────────────────────────────────────────
+// ─── Encounter Select ─────────────────────────────────────────────────────────
 
 function EncounterSelectScreen({ encounters, onSelect }) {
+  if (encounters.length === 0) {
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <div className="empty-state-icon">⚔️</div>
+          No encounters yet. Build one in the Encounter Builder tab first.
+        </div>
+      </div>
+    );
+  }
   return (
-    <div style={{ maxWidth: 560 }}>
-      <div className="section-heading" style={{ marginTop: 0 }}>Select an Encounter to Run</div>
-      {encounters.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">
-            <div className="empty-state-icon">⚔️</div>
-            No encounters saved yet. Build one in the Encounter Builder.
-          </div>
-        </div>
-      ) : (
-        <div className="card">
-          {encounters.map(enc => {
-            const monsterCount = enc.entries.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0);
-            const playerCount  = enc.entries.filter(e => e.type === 'player').length;
-            const isEmpty = enc.entries.length === 0;
-            const parts = [];
-            if (monsterCount > 0) parts.push(`${monsterCount} monster${monsterCount !== 1 ? 's' : ''}`);
-            if (playerCount > 0)  parts.push(`${playerCount} player${playerCount !== 1 ? 's' : ''}`);
-            return (
-              <div key={enc.id} className="list-row"
-                style={{ cursor: isEmpty ? 'default' : 'pointer' }}
-                onClick={() => !isEmpty && onSelect(enc)}>
-                <div className="list-row-main">
-                  <div className="list-row-title" style={{ color: isEmpty ? 'var(--text3)' : 'var(--text)' }}>{enc.name}</div>
-                  {isEmpty
-                    ? <div className="list-row-sub">Empty — add combatants in Encounter Builder</div>
-                    : parts.length > 0 && <div className="list-row-sub">{parts.join(' · ')}</div>
-                  }
-                </div>
-                {!isEmpty && <button className="btn btn-accent btn-sm">Run →</button>}
+    <div>
+      <div className="section-heading">Select an Encounter</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {encounters.map(enc => (
+          <button key={enc.id}
+            onClick={() => onSelect(enc)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '14px 16px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              cursor: 'pointer', textAlign: 'left', width: '100%',
+              transition: 'background 0.1s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+          >
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{enc.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
+                {enc.entries.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0)} monsters ·{' '}
+                {enc.entries.filter(e => e.type === 'player').length} players
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)' }}>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
-// ─── Screen 2: Initiative Mode Select ────────────────────────────────────────
+// ─── Initiative Mode ──────────────────────────────────────────────────────────
 
 function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
-  const [mode, setMode] = useState('individual');
+  const modes = [
+    { id: 'individual', label: 'Individual', desc: 'Each monster rolls separately' },
+    { id: 'group',      label: 'By Group',   desc: 'All monsters of the same type share one roll' },
+    { id: 'single',     label: 'Single Roll', desc: 'All monsters share one initiative roll' },
+  ];
   return (
-    <div style={{ maxWidth: 520 }}>
+    <div>
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>← Back</button>
-      <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>{encounter.name}</div>
-      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 20 }}>Choose how monster initiative is rolled.</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-        {[
-          { value: 'individual', title: 'Individual Initiative', desc: 'Each monster rolls separately. More granular turn order, more overhead.' },
-          { value: 'group', title: 'Group Initiative', desc: 'One roll for all monsters — they all act on the same initiative. The official optional rule from the DMG. Fastest play.' },
-        ].map(opt => (
-          <div key={opt.value} onClick={() => setMode(opt.value)} style={{
-            padding: '14px 16px', borderRadius: 'var(--radius)',
-            border: `2px solid ${mode === opt.value ? 'var(--accent)' : 'var(--border)'}`,
-            background: mode === opt.value ? 'var(--accent-bg)' : 'var(--surface)',
-            cursor: 'pointer', transition: 'all 0.15s',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width:16,height:16,borderRadius:'50%',flexShrink:0,border:`2px solid ${mode===opt.value?'var(--accent)':'var(--border-strong)'}`,background:mode===opt.value?'var(--accent)':'transparent',transition:'all 0.15s' }}/>
-              <div>
-                <div style={{ fontSize:13,fontWeight:600,color:mode===opt.value?'var(--accent-text)':'var(--text)' }}>{opt.title}</div>
-                <div style={{ fontSize:12,color:'var(--text2)',marginTop:2,lineHeight:1.5 }}>{opt.desc}</div>
-              </div>
+      <div className="section-heading">Initiative Mode for "{encounter.name}"</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {modes.map(m => (
+          <button key={m.id} onClick={() => onConfirm(m.id)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '14px 16px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              cursor: 'pointer', textAlign: 'left', width: '100%',
+              transition: 'background 0.1s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{m.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{m.desc}</div>
             </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)' }}>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Initiative Input ─────────────────────────────────────────────────────────
+
+function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) {
+  const [inits, setInits] = useState(() => {
+    const m = {};
+    combatants.forEach(c => { m[c.id] = ''; });
+    return m;
+  });
+
+  function setInit(id, val) { setInits(prev => ({ ...prev, [id]: val })); }
+
+  function rollAll() {
+    const next = { ...inits };
+    if (initiativeMode === 'individual') {
+      combatants.forEach(c => {
+        if (c.type === 'monster') next[c.id] = String(rollD20() + c.initMod);
+      });
+    } else if (initiativeMode === 'group') {
+      const rolled = {};
+      combatants.forEach(c => {
+        if (c.type === 'monster') {
+          if (!rolled[c.groupKey ?? c.baseName]) rolled[c.groupKey ?? c.baseName] = rollD20() + c.initMod;
+          next[c.id] = String(rolled[c.groupKey ?? c.baseName]);
+        }
+      });
+    } else {
+      const roll = rollD20();
+      combatants.forEach(c => { if (c.type === 'monster') next[c.id] = String(roll + c.initMod); });
+    }
+    setInits(next);
+  }
+
+  const allSet = combatants.every(c => inits[c.id] !== '' && parseInt(inits[c.id]) >= 1);
+
+  function handleStart() {
+    if (!allSet) return;
+    const sorted = combatants
+      .map(c => ({ ...c, initiative: parseInt(inits[c.id]) }))
+      .sort((a, b) => b.initiative - a.initiative);
+    onStart(sorted);
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
+        <button className="btn btn-ghost btn-sm" onClick={rollAll}>🎲 Roll Monster Initiatives</button>
+      </div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        {combatants.map((c, i) => (
+          <div key={c.id} style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+            borderBottom: i < combatants.length - 1 ? '1px solid var(--border)' : 'none',
+          }}>
+            <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{c.name}</div>
+              {c.initMod !== 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                  mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}
+                </div>
+              )}
+            </div>
+            <InitInput value={inits[c.id]} onChange={val => setInit(c.id, val)} />
           </div>
         ))}
       </div>
-      <button className="btn btn-accent" style={{ minWidth: 180 }} onClick={() => onConfirm(mode)}>
-        Set Initiatives →
-      </button>
-    </div>
-  );
-}
-
-// ─── Screen 3: Initiative Input ───────────────────────────────────────────────
-// Shared mode: one row per monster group, one Roll button, sets all in group.
-// Individual mode: one row per monster, each with their own Roll button.
-// Players: always manual, always min 1.
-
-function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) {
-  const [initiatives, setInitiatives] = useState(() => {
-    const init = {};
-    combatants.forEach(c => { init[c.id] = ''; });
-    return init;
-  });
-
-  const monsterGroups = [...new Map(
-    combatants.filter(c => c.type === 'monster').map(c => [c.groupKey, c])
-  ).values()];
-
-  function setVal(id, val) {
-    setInitiatives(prev => ({ ...prev, [id]: val }));
-  }
-
-  function setGroupVal(groupKey, val) {
-    setInitiatives(prev => {
-      const next = { ...prev };
-      combatants.filter(c => c.groupKey === groupKey).forEach(c => { next[c.id] = val; });
-      return next;
-    });
-  }
-
-  function rollGroup(groupKey) {
-    const rep = combatants.find(c => c.groupKey === groupKey);
-    if (!rep) return;
-    setGroupVal(groupKey, String(Math.max(1, rollD20() + rep.initMod)));
-  }
-
-  function rollIndividual(id, initMod) {
-    setVal(id, String(Math.max(1, rollD20() + initMod)));
-  }
-
-  function rollAll() {
-    setInitiatives(prev => {
-      const next = { ...prev };
-      const allMonsters = combatants.filter(c => c.type === 'monster');
-      if (initiativeMode === 'group') {
-        const rep = allMonsters.reduce((best, c) => c.initMod > (best?.initMod ?? -99) ? c : best, null);
-        const result = String(Math.max(1, rollD20() + (rep?.initMod ?? 0)));
-        allMonsters.forEach(c => { next[c.id] = result; });
-      } else {
-        allMonsters.forEach(c => { next[c.id] = String(Math.max(1, rollD20() + c.initMod)); });
-      }
-      return next;
-    });
-  }
-
-  function handleStart() {
-    const withInit = combatants.map(c => ({
-      ...c,
-      initiative: Math.max(1, parseInt(initiatives[c.id]) || 1),
-    })).sort((a, b) => b.initiative - a.initiative || b.initMod - a.initMod);
-    onStart(withInit);
-  }
-
-  const players = combatants.filter(c => c.type === 'player');
-  const allSet  = combatants.every(c => initiatives[c.id] !== '' && !isNaN(parseInt(initiatives[c.id])));
-
-  function getGroupVal(groupKey) {
-    const member = combatants.find(c => c.groupKey === groupKey);
-    return member ? initiatives[member.id] : '';
-  }
-
-  return (
-    <div style={{ maxWidth: 560 }}>
-      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>← Back</button>
-
-      <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16 }}>
-        <div>
-          <div style={{ fontSize:16,fontWeight:600,color:'var(--text)' }}>Set Initiatives</div>
-          <div style={{ fontSize:12,color:'var(--text2)',marginTop:2 }}>
-            {initiativeMode === 'group' ? 'One roll for all monsters — they all act on the same turn.' : 'Each combatant rolls separately.'}
-          </div>
-        </div>
-        <button className="btn btn-ghost btn-sm" onClick={rollAll}>🎲 Roll All Monsters</button>
-      </div>
-
-      {/* Players — separate section */}
-      {players.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div className="section-heading" style={{ marginTop: 0 }}>Players</div>
-          <div className="card">
-            {players.map(c => (
-              <div className="list-row" key={c.id}>
-                <div className="combatant-dot dot-player" style={{ flexShrink: 0 }} />
-                <div className="list-row-main">
-                  <div className="list-row-title">{c.name}</div>
-                  <div className="list-row-sub">Enter initiative from player (min 1)</div>
-                </div>
-                <InitInput value={initiatives[c.id]} onChange={val => setVal(c.id, val)} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Monsters — separate section */}
-      <div style={{ marginBottom: 20 }}>
-        <div className="section-heading" style={{ marginTop: 0 }}>Monsters</div>
-        <div className="card">
-          {initiativeMode === 'group' ? (
-            (() => {
-              const allMonsters = combatants.filter(c => c.type === 'monster');
-              const rep = allMonsters.reduce((best, c) => c.initMod > (best?.initMod ?? -99) ? c : best, null);
-              const groupVal = rep ? initiatives[rep.id] : '';
-              const totalCount = allMonsters.length;
-              return (
-                <div className="list-row">
-                  <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
-                  <div className="list-row-main">
-                    <div className="list-row-title">All Monsters</div>
-                    <div className="list-row-sub">
-                      {totalCount} combatant{totalCount !== 1 ? 's' : ''} · highest init mod {rep?.initMod >= 0 ? `+${rep?.initMod}` : rep?.initMod} · all act together
-                    </div>
-                  </div>
-                  <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
-                    onClick={() => {
-                      const result = String(Math.max(1, rollD20() + (rep?.initMod ?? 0)));
-                      setInitiatives(prev => {
-                        const next = { ...prev };
-                        allMonsters.forEach(c => { next[c.id] = result; });
-                        return next;
-                      });
-                    }}>
-                    🎲 Roll
-                  </button>
-                  <InitInput value={groupVal} onChange={val => {
-                    setInitiatives(prev => {
-                      const next = { ...prev };
-                      allMonsters.forEach(c => { next[c.id] = val; });
-                      return next;
-                    });
-                  }} />
-                </div>
-              );
-            })()
-          ) : (
-            combatants.filter(c => c.type === 'monster').map(c => (
-              <div className="list-row" key={c.id}>
-                <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
-                <div className="list-row-main">
-                  <div className="list-row-title">{c.name}</div>
-                  <div className="list-row-sub">Init {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}</div>
-                </div>
-                <button className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }}
-                  onClick={() => rollIndividual(c.id, c.initMod)}>
-                  🎲 Roll
-                </button>
-                <InitInput value={initiatives[c.id]} onChange={val => setVal(c.id, val)} />
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <button className="btn btn-accent" style={{ minWidth:180, opacity: allSet ? 1 : 0.5 }}
-        onClick={handleStart} disabled={!allSet}
-        title={!allSet ? 'Set all initiatives to continue' : ''}>
+      <button
+        className="btn btn-accent btn-full"
+        style={{ opacity: allSet ? 1 : 0.5 }}
+        onClick={handleStart}
+        disabled={!allSet}
+        title={!allSet ? 'Set all initiatives to continue' : ''}
+      >
         ⚔️ Start Combat
       </button>
-      {!allSet && <div style={{ marginTop:8,fontSize:12,color:'var(--text3)' }}>All initiatives must be set before starting.</div>}
+      {!allSet && (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text3)' }}>
+          All initiatives must be set before starting.
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Main CombatRunner ────────────────────────────────────────────────────────
 
-export default function CombatRunner({ encounters, monsters = [] }) {
-  const [screen, setScreen]                       = useState('select');
-  const [selectedEncounter, setSelectedEncounter] = useState(null);
-  const [initiativeMode, setInitiativeMode]       = useState('individual');
-  const [pendingCombatants, setPendingCombatants] = useState([]);
-
-  const [combatants, setCombatants] = useState([]);
-  const [round, setRound]           = useState(1);
-  const [turnIdx, setTurnIdx]       = useState(0);
-  const [log, setLog]               = useState([]);
-  const [actionModal, setActionModal]     = useState(null);
-  const [addMonsterModal, setAddMonsterModal] = useState(false);
+export default function CombatRunner({
+  encounters,
+  // All combat state is lifted to App.jsx to persist across tab switches
+  screen, setScreen,
+  selectedEncounter, setSelectedEncounter,
+  initiativeMode, setInitiativeMode,
+  pendingCombatants, setPendingCombatants,
+  combatants, setCombatants,
+  round, setRound,
+  turnIdx, setTurnIdx,
+  log, setLog,
+}) {
+  const [actionModal, setActionModal] = useState(null);
 
   const dragIdx     = useRef(null);
   const dragOverIdx = useRef(null);
@@ -964,9 +982,12 @@ export default function CombatRunner({ encounters, monsters = [] }) {
       if (next >= prev.length) { next = 0; newRound = round + 1; addLog(`── Round ${newRound} begins ──`, newRound); }
       let safety = 0;
       while (prev[next] && (prev[next].maxHp - prev[next].damage) <= 0 && safety < prev.length) {
-        next = (next + 1) % prev.length; if (next === 0) newRound++; safety++;
+        next = (next + 1) % prev.length;
+        if (next === 0) newRound++;
+        safety++;
       }
-      setTurnIdx(next); setRound(newRound);
+      setTurnIdx(next);
+      setRound(newRound);
       if (prev[next]) addLog(`${prev[next].name}'s turn`, newRound);
       return prev;
     });
@@ -976,12 +997,24 @@ export default function CombatRunner({ encounters, monsters = [] }) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, ...changes } : c));
   }
 
-  function toggleCondition(id, condId) {
+  // conditions are now { id, turns } objects
+  function toggleCondition(id, condId, turns) {
     setCombatants(prev => prev.map(c => {
       if (c.id !== id) return c;
-      const has = c.conditions.includes(condId);
-      const conditions = has ? c.conditions.filter(x => x !== condId) : [...c.conditions, condId];
-      addLog(`${c.name} ${has ? 'lost' : 'gained'} ${condId}`, round);
+      const hasIdx = c.conditions.findIndex(x => x.id === condId);
+      let conditions;
+      if (turns === null && hasIdx >= 0) {
+        // remove
+        conditions = c.conditions.filter(x => x.id !== condId);
+        addLog(`${c.name} lost ${condId}`, round);
+      } else if (hasIdx < 0) {
+        // add
+        conditions = [...c.conditions, { id: condId, turns: turns ?? null }];
+        const turnsStr = turns != null ? ` (${turns} turns)` : '';
+        addLog(`${c.name} gained ${condId}${turnsStr}`, round);
+      } else {
+        return c;
+      }
       return { ...c, conditions };
     }));
   }
@@ -989,7 +1022,8 @@ export default function CombatRunner({ encounters, monsters = [] }) {
   function toggleSlot(id, level) {
     setCombatants(prev => prev.map(c => {
       if (c.id !== id) return c;
-      const used = c.usedSlots?.[level] || 0, total = c.spellSlots?.[level] || 0;
+      const used  = c.usedSlots?.[level] || 0;
+      const total = c.spellSlots?.[level] || 0;
       const newUsed = used < total ? used + 1 : 0;
       addLog(`${c.name} ${newUsed > used ? 'expended' : 'recovered'} a level ${level} slot`, round);
       return { ...c, usedSlots: { ...c.usedSlots, [level]: newUsed } };
@@ -1000,41 +1034,58 @@ export default function CombatRunner({ encounters, monsters = [] }) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
   }
 
-  function onApplyAction(targetId, damage, action, attacker) {
+  // Updated: handles damage, healing, tempHp, and optional condition
+  function onApplyAction(targetId, damage, heal, tempHp, action, attacker, conditionId, conditionTurns) {
     setCombatants(prev => prev.map(c => {
       if (c.id !== targetId) return c;
-      return { ...c, damage: Math.min(c.maxHp, c.damage + damage) };
+      let newDamage = c.damage;
+      let newTempHp = c.tempHp ?? 0;
+      if (damage > 0) newDamage = Math.min(c.maxHp, c.damage + damage);
+      if (heal > 0)   newDamage = Math.max(0, newDamage - heal);
+      if (tempHp > 0) newTempHp = Math.max(newTempHp, tempHp); // temp HP doesn't stack, take highest
+
+      let newConditions = [...c.conditions];
+      if (conditionId) {
+        const alreadyHas = newConditions.some(x => x.id === conditionId);
+        if (!alreadyHas) newConditions = [...newConditions, { id: conditionId, turns: conditionTurns }];
+      }
+      return { ...c, damage: newDamage, tempHp: newTempHp, conditions: newConditions };
     }));
+
     const target = combatants.find(c => c.id === targetId);
-    const targetHpAfter = target ? Math.max(0, (target.maxHp - target.damage) - damage) : 0;
-    addLog(`${attacker.name} used ${action?.name ?? 'attack'} on ${target?.name ?? '?'} for ${damage} dmg (→ ${targetHpAfter} HP)`, round);
+    const actionDesc = action?.name ?? 'attack';
+    const parts = [];
+    if (damage > 0) {
+      const targetHpAfter = target ? Math.max(0, (target.maxHp - target.damage) - damage) : 0;
+      parts.push(`${damage} dmg (→ ${targetHpAfter} HP)`);
+    }
+    if (heal > 0) parts.push(`healed ${heal}`);
+    if (tempHp > 0) parts.push(`+${tempHp} temp HP`);
+    if (conditionId) parts.push(`applied ${conditionId}${conditionTurns != null ? ` (${conditionTurns}t)` : ''}`);
+    if (parts.length > 0) {
+      addLog(`${attacker.name} → ${target?.name ?? '?'} [${actionDesc}]: ${parts.join(', ')}`, round);
+    }
   }
 
-  // Insert the new combatant into the right position in initiative order
-  function handleAddMonster(combatant) {
-    setCombatants(prev => {
-      // Find insertion point: after all combatants with higher or equal initiative
-      const insertAfter = prev.reduce((lastIdx, c, i) => c.initiative >= combatant.initiative ? i : lastIdx, -1);
-      const next = [...prev];
-      next.splice(insertAfter + 1, 0, combatant);
-      // If insertion is before or at current turn, shift turnIdx to keep current active
-      const newTurnIdx = insertAfter + 1 <= turnIdx ? turnIdx + 1 : turnIdx;
-      setTurnIdx(newTurnIdx);
-      return next;
-    });
-    addLog(`➕ ${combatant.name} joined combat (init ${combatant.initiative}) — acts next round`, round);
-  }
+  // ── Drag ──────────────────────────────────────────────────────────────────
 
   function onHandleDragStart(e, idx) {
-    dragIdx.current = idx; setDraggingId(combatants[idx].id);
-    e.dataTransfer.effectAllowed = 'move'; e.stopPropagation();
+    dragIdx.current = idx;
+    setDraggingId(combatants[idx].id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.stopPropagation();
   }
+
   function onRowDragOver(e, idx) {
-    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-    dragOverIdx.current = idx; setDragOverId(combatants[idx].id);
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    dragOverIdx.current = idx;
+    setDragOverId(combatants[idx].id);
   }
+
   function onRowDragLeave() { setDragOverId(null); }
   function onDragEnd()      { dragIdx.current = null; setDraggingId(null); setDragOverId(null); }
+
   function onRowDrop(e, idx) {
     e.preventDefault();
     const from = dragIdx.current;
@@ -1051,23 +1102,31 @@ export default function CombatRunner({ encounters, monsters = [] }) {
     dragIdx.current = null; setDraggingId(null); setDragOverId(null);
   }
 
+  // ── Screens ────────────────────────────────────────────────────────────────
+
   if (screen === 'select')     return <EncounterSelectScreen encounters={encounters} onSelect={handleSelectEncounter} />;
   if (screen === 'mode')       return <InitiativeModeScreen encounter={selectedEncounter} onConfirm={handleConfirmMode} onBack={() => setScreen('select')} />;
   if (screen === 'initiative') return <InitiativeInputScreen combatants={pendingCombatants} initiativeMode={initiativeMode} onStart={handleStartCombat} onBack={() => setScreen('mode')} />;
+
+  // ── Combat screen ──────────────────────────────────────────────────────────
 
   const activeCombatant = combatants[turnIdx];
 
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
 
+      {/* Action modal */}
       {actionModal && (
-        <ActionModal attacker={actionModal} combatants={combatants} onApply={onApplyAction} onClose={() => setActionModal(null)} />
-      )}
-      {addMonsterModal && (
-        <AddMonsterModal monsters={monsters} currentCombatants={combatants} onAdd={handleAddMonster} onClose={() => setAddMonsterModal(false)} />
+        <ActionModal
+          attacker={actionModal}
+          combatants={combatants}
+          onApply={onApplyAction}
+          onClose={() => setActionModal(null)}
+        />
       )}
 
-      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* Main combatant list — slightly narrower to give log more room */}
+      <div style={{ flex: '0 0 auto', width: 'calc(100% - 340px)', minWidth: 0 }}>
 
         {/* Combat header */}
         <div className="combat-header">
@@ -1081,13 +1140,12 @@ export default function CombatRunner({ encounters, monsters = [] }) {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-accent" onClick={nextTurn}>Next Turn →</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setAddMonsterModal(true)} title="Add a monster to the current combat">+ Monster</button>
             <button className="btn btn-ghost" style={{ color: 'var(--accent)' }} onClick={endCombat}>End Combat</button>
           </div>
         </div>
 
         {/* Combatant rows */}
-        <div className="card" style={{ marginTop: 12, overflow: 'hidden' }}>
+        <div>
           {combatants.map((c, idx) => {
             const currentHp = c.maxHp - c.damage;
             const status    = hpStatus(currentHp, c.maxHp);
@@ -1100,9 +1158,9 @@ export default function CombatRunner({ encounters, monsters = [] }) {
                 key={c.id}
                 className={[
                   'combatant-row',
-                  isActive   ? 'active-turn' : '',
-                  isDead     ? 'dead'         : '',
-                  draggingId === c.id ? 'dragging'  : '',
+                  isActive ? 'active-turn' : '',
+                  isDead   ? 'dead' : '',
+                  draggingId === c.id ? 'dragging' : '',
                   dragOverId === c.id && draggingId !== c.id ? 'drag-over' : '',
                 ].filter(Boolean).join(' ')}
                 onDragOver={e => onRowDragOver(e, idx)}
@@ -1112,11 +1170,17 @@ export default function CombatRunner({ encounters, monsters = [] }) {
                 <div className="combatant-row-main">
 
                   {/* Drag handle */}
-                  <div className="drag-handle" title="Drag to reorder" draggable onDragStart={e => onHandleDragStart(e, idx)} onDragEnd={onDragEnd}>
+                  <div
+                    className="drag-handle"
+                    title="Drag to reorder"
+                    draggable
+                    onDragStart={e => onHandleDragStart(e, idx)}
+                    onDragEnd={onDragEnd}
+                  >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                      <circle cx="9" cy="5" r="1.5"/><circle cx="15" cy="5" r="1.5"/>
-                      <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
-                      <circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="19" r="1.5"/>
+                      <circle cx="9"  cy="5"  r="1.5" /><circle cx="15" cy="5"  r="1.5" />
+                      <circle cx="9"  cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+                      <circle cx="9"  cy="19" r="1.5" /><circle cx="15" cy="19" r="1.5" />
                     </svg>
                   </div>
 
@@ -1124,17 +1188,15 @@ export default function CombatRunner({ encounters, monsters = [] }) {
                   <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
 
                   <div className="combatant-name-col">
-                    <div className="combatant-name">
-                      {c.name}
-                      {c.addedMidCombat && <span style={{ marginLeft:6,fontSize:10,color:'var(--text3)',fontStyle:'italic' }}>next round</span>}
-                    </div>
+                    <div className="combatant-name">{c.name}</div>
                     {c.conditions.length > 0 && (
                       <div className="combatant-conditions">
-                        {c.conditions.map(cond => <ConditionChip key={cond} condition={cond} />)}
+                        {c.conditions.map(cond => <ConditionChip key={cond.id} condition={cond} />)}
                       </div>
                     )}
                     <div className="hp-bar-track" style={{ marginTop: 4 }}>
-                      <div className="hp-bar-fill" style={{ width: `${Math.max(0, hpPct) * 100}%`, background: hpBarColor(status) }} />
+                      <div className="hp-bar-fill"
+                        style={{ width: `${Math.max(0, hpPct) * 100}%`, background: hpBarColor(status) }} />
                     </div>
                   </div>
 
@@ -1159,7 +1221,7 @@ export default function CombatRunner({ encounters, monsters = [] }) {
                     </div>
                   </div>
 
-                  {/* Action button — original label */}
+                  {/* Action button */}
                   <div style={{ borderLeft: '1px solid var(--border)', paddingLeft: 8, paddingRight: 4, display: 'flex', alignItems: 'center' }}>
                     <button
                       className="btn btn-ghost btn-sm"
@@ -1172,7 +1234,8 @@ export default function CombatRunner({ encounters, monsters = [] }) {
                     </button>
                   </div>
 
-                  <div className="combatant-chevron" onClick={() => toggleExpanded(c.id)} title={c.expanded ? 'Collapse' : 'Expand'}>
+                  <div className="combatant-chevron" onClick={() => toggleExpanded(c.id)}
+                    title={c.expanded ? 'Collapse' : 'Expand'}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                       strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                       style={{ transform: c.expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
@@ -1182,7 +1245,8 @@ export default function CombatRunner({ encounters, monsters = [] }) {
                 </div>
 
                 {c.expanded && (
-                  <CombatantExpand c={c} onUpdate={updateCombatant} onToggleSlot={toggleSlot} onToggleCondition={toggleCondition} />
+                  <CombatantExpand c={c} onUpdate={updateCombatant}
+                    onToggleSlot={toggleSlot} onToggleCondition={toggleCondition} />
                 )}
               </div>
             );
@@ -1190,13 +1254,15 @@ export default function CombatRunner({ encounters, monsters = [] }) {
         </div>
       </div>
 
-      {/* Combat log */}
-      <div style={{ width: 260, flexShrink: 0 }}>
+      {/* Combat log — wider */}
+      <div style={{ width: 320, flexShrink: 0 }}>
         <div className="combat-log">
           <div className="combat-log-header">Combat Log</div>
           <div className="combat-log-entries">
             {log.length === 0 && (
-              <div style={{ padding: '12px', color: 'var(--text3)', fontSize: 12, fontFamily: 'DM Mono, monospace' }}>No events yet.</div>
+              <div style={{ padding: '12px', color: 'var(--text3)', fontSize: 12, fontFamily: 'DM Mono, monospace' }}>
+                No events yet.
+              </div>
             )}
             {log.map(entry => (
               <div className="log-entry" key={entry.id}>

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-export default function Modal({ title, onClose, children, wide }) {
+export default function Modal({ title, onClose, children, wide, allowOutsideClose = false }) {
   useEffect(() => {
     const handler = e => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
@@ -10,7 +10,9 @@ export default function Modal({ title, onClose, children, wide }) {
   return (
     <div
       className="modal-overlay"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={e => {
+        if (allowOutsideClose && e.target === e.currentTarget) onClose();
+      }}
     >
       <div className="modal" style={wide ? { maxWidth: 760 } : {}}>
         <div className="modal-header">
