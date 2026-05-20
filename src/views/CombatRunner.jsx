@@ -73,6 +73,7 @@ function buildCombatants(entries) {
         initiative: null,
         initMod: dexMod(p.abilities) + (p.initiativeMod ?? 0),
         conditions: [],
+        tempHp: 0,
         spellSlots: p.spellSlots ? JSON.parse(JSON.stringify(p.spellSlots)) : null,
         usedSlots: {},
         attacks: p.attacks ?? [],
@@ -100,6 +101,7 @@ function buildCombatants(entries) {
           initiative: null,
           initMod: groupInitMod,
           conditions: [],
+          tempHp: 0,
           spellSlots: m.spellSlots ? JSON.parse(JSON.stringify(m.spellSlots)) : null,
           usedSlots: {},
           attacks: m.attacks ?? [],
@@ -158,21 +160,30 @@ function SlotPips({ total, used, onToggle }) {
   );
 }
 
-function QuickHP({ label, color, sign, c, onUpdate }) {
+function QuickHPRow({ label, color, placeholder, onApply }) {
   const [val, setVal] = useState('');
+  function commit() {
+    const amt = parseInt(val) || 0;
+    if (amt === 0) return;
+    onApply(amt);
+    setVal('');
+  }
   return (
-    <div style={{ display: 'flex', gap: 4, flex: 1, alignItems: 'center' }}>
-      <input type="number" min={0} placeholder="0" value={val}
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <input
+        type="number"
+        min={0}
+        placeholder={placeholder ?? '0'}
+        value={val}
         onChange={e => setVal(e.target.value)}
-        style={{ flex: 1, padding: '5px 8px', fontSize: 13 }} />
-      <button className="btn btn-ghost btn-sm" style={{ color, flexShrink: 0 }}
-        onClick={() => {
-          const amt = parseInt(val) || 0;
-          if (amt === 0) return;
-          if (sign < 0) onUpdate(c.id, { damage: Math.min(c.maxHp, c.damage + amt) });
-          else onUpdate(c.id, { damage: Math.max(0, c.damage - amt) });
-          setVal('');
-        }}>
+        onKeyDown={e => e.key === 'Enter' && commit()}
+        style={{ flex: 1, padding: '5px 8px', fontSize: 13 }}
+      />
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ color, flexShrink: 0, minWidth: 72 }}
+        onClick={commit}
+      >
         {label}
       </button>
     </div>
@@ -209,10 +220,37 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
                   {currentHp}
                 </div>
               </div>
+              <div className="hp-edit-field">
+                <span className="hp-edit-label">Temp HP</span>
+                <input
+                  type="number"
+                  className="hp-edit-input"
+                  min={0}
+                  value={c.tempHp ?? 0}
+                  onChange={e => onUpdate(c.id, { tempHp: Math.max(0, parseInt(e.target.value) || 0) })}
+                  style={{ color: 'var(--blue, #3b82f6)' }}
+                />
+              </div>
             </div>
-            <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-              <QuickHP label="Damage" color="var(--accent)" sign={-1} c={c} onUpdate={onUpdate} />
-              <QuickHP label="Heal"   color="var(--green)"  sign={+1} c={c} onUpdate={onUpdate} />
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <QuickHPRow
+                label="Damage"
+                color="var(--accent)"
+                placeholder="Amount"
+                onApply={amt => onUpdate(c.id, { damage: Math.min(c.maxHp, c.damage + amt) })}
+              />
+              <QuickHPRow
+                label="Heal"
+                color="var(--green)"
+                placeholder="Amount"
+                onApply={amt => onUpdate(c.id, { damage: Math.max(0, c.damage - amt) })}
+              />
+              <QuickHPRow
+                label="Temp HP"
+                color="var(--blue, #3b82f6)"
+                placeholder="Amount"
+                onApply={amt => onUpdate(c.id, { tempHp: (c.tempHp ?? 0) + amt })}
+              />
             </div>
           </div>
 
