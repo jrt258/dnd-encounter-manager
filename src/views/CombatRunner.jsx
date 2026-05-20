@@ -132,7 +132,7 @@ function buildCombatants(entries) {
 // condition is now { id, turns } — turns === null means indefinite
 function ConditionChip({ condition, onRemove }) {
   const def = CONDITIONS.find(c => c.id === condition.id) ?? { label: condition.id, color: '#666', bg: '#eee' };
-  const label = condition.turns != null ? `${def.label} (${condition.turns}t)` : def.label;
+  const label = condition.turns != null ? `${def.label} (${condition.turns} Turns)` : def.label;
   return (
     <span className="condition-chip" style={{ background: def.bg, color: def.color }} title={def.label}>
       {label}
@@ -144,57 +144,62 @@ function ConditionChip({ condition, onRemove }) {
   );
 }
 
-// ── Condition toggle grid with per-condition turn input ───────────────────────
+// Single "Turns:" field above the pill grid; blank = indefinite
 function ConditionToggleGrid({ active, onToggle }) {
-  // pendingTurns: track local turn input for each condition
-  const [pendingTurns, setPendingTurns] = useState({});
+  const [pendingTurns, setPendingTurns] = useState('');
 
-  function getActive(condId) {
-    return active.find(c => c.id === condId) ?? null;
+  function isActive(condId) {
+    return active.some(c => c.id === condId);
+  }
+
+  function handleToggle(condId) {
+    if (isActive(condId)) {
+      // removing — pass null to signal removal
+      onToggle(condId, null);
+    } else {
+      // adding — use pendingTurns if set, else null (indefinite)
+      const turns = pendingTurns !== '' ? parseInt(pendingTurns) : null;
+      onToggle(condId, turns);
+    }
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {CONDITIONS.map(c => {
-        const activeEntry = getActive(c.id);
-        const isActive = !!activeEntry;
-        const pending = pendingTurns[c.id] ?? '';
-
-        return (
-          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              className={`condition-toggle${isActive ? ' active' : ''}`}
-              style={isActive ? { background: c.color, borderColor: c.color, flex: 1 } : { flex: 1 }}
-              onClick={() => {
-                const turns = pending !== '' ? parseInt(pending) : null;
-                onToggle(c.id, isActive ? null : turns);
-                if (!isActive) setPendingTurns(prev => ({ ...prev, [c.id]: '' }));
-              }}
+    <div>
+      {/* Single turns field */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', whiteSpace: 'nowrap' }}>
+          Turns:
+        </span>
+        <input
+          type="number"
+          min={1}
+          placeholder="∞"
+          value={pendingTurns}
+          onChange={e => setPendingTurns(e.target.value)}
+          style={{ width: 64, padding: '3px 8px', fontSize: 12, textAlign: 'center' }}
+          title="How many turns the next condition applied will last (leave blank for indefinite)"
+        />
+        <span style={{ fontSize: 11, color: 'var(--text3)' }}>for next condition applied</span>
+      </div>
+      {/* Pill grid */}
+      <div className="condition-toggle-grid">
+        {CONDITIONS.map(c => {
+          const active_ = isActive(c.id);
+          const entry = active.find(x => x.id === c.id);
+          return (
+            <button key={c.id}
+              className={`condition-toggle${active_ ? ' active' : ''}`}
+              style={active_ ? { background: c.color, borderColor: c.color } : {}}
+              onClick={() => handleToggle(c.id)}
             >
               {c.label}
-              {isActive && activeEntry.turns != null && (
-                <span style={{ marginLeft: 4, fontSize: 9, opacity: 0.85 }}>({activeEntry.turns}t)</span>
+              {active_ && entry?.turns != null && (
+                <span style={{ marginLeft: 3, fontSize: 9, opacity: 0.85 }}>({entry.turns}t)</span>
               )}
             </button>
-            {!isActive && (
-              <input
-                type="number"
-                min={1}
-                placeholder="turns"
-                value={pending}
-                onChange={e => setPendingTurns(prev => ({ ...prev, [c.id]: e.target.value }))}
-                style={{ width: 56, padding: '3px 6px', fontSize: 11, textAlign: 'center' }}
-                title="Optional: how many turns this condition lasts"
-              />
-            )}
-            {isActive && (
-              <div style={{ width: 56, fontSize: 11, color: 'var(--text3)', textAlign: 'center' }}>
-                {activeEntry.turns != null ? `${activeEntry.turns}t` : '∞'}
-              </div>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -227,6 +232,35 @@ function QuickHP({ label, color, sign, c, onUpdate }) {
         }}>
         {label}
       </button>
+    </div>
+  );
+}
+
+// ─── Expandable attack/spell row with notes ───────────────────────────────────
+
+function AttackRowExpand({ atk, isLast }) {
+  const [open, setOpen] = useState(false);
+  const hasNotes = atk.notes && atk.notes.trim().length > 0;
+  return (
+    <div style={{ borderBottom: !isLast ? '1px solid var(--border)' : 'none' }}>
+      <div className="attack-row" style={{ cursor: hasNotes ? 'pointer' : 'default' }}
+        onClick={() => hasNotes && setOpen(o => !o)}>
+        <span className="attack-name">{atk.name}</span>
+        {atk.hitBonus !== undefined && <span className="attack-stat">{atk.hitBonus >= 0 ? '+' : ''}{atk.hitBonus} to hit</span>}
+        {atk.damage && <span className="attack-stat">{atk.damage} {atk.damageType ?? ''}</span>}
+        {hasNotes && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            style={{ marginLeft: 'auto', color: 'var(--text3)', flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        )}
+      </div>
+      {open && hasNotes && (
+        <div style={{ padding: '6px 12px 8px', fontSize: 11, color: 'var(--text2)', lineHeight: 1.5, background: 'var(--surface2)', borderTop: '1px solid var(--border)' }}>
+          {atk.notes}
+        </div>
+      )}
     </div>
   );
 }
@@ -329,11 +363,7 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
               <div className="expand-section-title">Attacks</div>
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
                 {c.attacks.map((atk, i) => (
-                  <div className="attack-row" key={i}>
-                    <span className="attack-name">{atk.name}</span>
-                    {atk.hitBonus !== undefined && <span className="attack-stat">{atk.hitBonus >= 0 ? '+' : ''}{atk.hitBonus} to hit</span>}
-                    {atk.damage && <span className="attack-stat">{atk.damage} {atk.damageType ?? ''}</span>}
-                  </div>
+                  <AttackRowExpand key={i} atk={atk} isLast={i === c.attacks.length - 1} />
                 ))}
               </div>
             </div>
@@ -353,6 +383,17 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {c.spells?.length > 0 && (
+            <div className="expand-section" style={{ marginTop: 14 }}>
+              <div className="expand-section-title">Spells</div>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                {c.spells.map((sp, i) => (
+                  <AttackRowExpand key={i} atk={{ name: sp.name, notes: sp.description ?? sp.effect ?? '', damage: sp.damage ?? sp.effect ?? '' }} isLast={i === c.spells.length - 1} />
+                ))}
               </div>
             </div>
           )}
@@ -804,31 +845,31 @@ function EncounterSelectScreen({ encounters, onSelect }) {
 function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
   const modes = [
     { id: 'individual', label: 'Individual', desc: 'Each monster rolls separately' },
-    { id: 'group',      label: 'By Group',   desc: 'All monsters of the same type share one roll' },
-    { id: 'single',     label: 'Single Roll', desc: 'All monsters share one initiative roll' },
+    { id: 'group',      label: 'By Group',   desc: 'All of the same type share one roll' },
+    { id: 'single',     label: 'Single Roll', desc: 'All monsters share one roll' },
   ];
   return (
-    <div>
+    <div style={{ maxWidth: 400 }}>
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={onBack}>← Back</button>
-      <div className="section-heading">Initiative Mode for "{encounter.name}"</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {modes.map(m => (
+      <div className="section-heading">Initiative Mode — {encounter.name}</div>
+      <div className="card">
+        {modes.map((m, i) => (
           <button key={m.id} onClick={() => onConfirm(m.id)}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '14px 16px', borderRadius: 'var(--radius-sm)',
-              border: '1px solid var(--border)', background: 'var(--surface)',
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', background: 'none', border: 'none',
+              borderBottom: i < modes.length - 1 ? '1px solid var(--border)' : 'none',
               cursor: 'pointer', textAlign: 'left', width: '100%',
               transition: 'background 0.1s',
             }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
-            <div>
+            <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{m.label}</div>
               <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{m.desc}</div>
             </div>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
               <polyline points="9 18 15 12 9 6" />
             </svg>
           </button>
@@ -870,6 +911,9 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
     setInits(next);
   }
 
+  const players  = combatants.filter(c => c.type === 'player');
+  const monsters = combatants.filter(c => c.type === 'monster');
+
   const allSet = combatants.every(c => inits[c.id] !== '' && parseInt(inits[c.id]) >= 1);
 
   function handleStart() {
@@ -880,31 +924,55 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
     onStart(sorted);
   }
 
+  function CombatantInitRow({ c, idx, isLast }) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+        borderBottom: !isLast ? '1px solid var(--border)' : 'none',
+      }}>
+        <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{c.name}</div>
+          {c.initMod !== 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+              mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}
+            </div>
+          )}
+        </div>
+        <InitInput value={inits[c.id]} onChange={val => setInit(c.id, val)} />
+      </div>
+    );
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
         <button className="btn btn-ghost btn-sm" onClick={rollAll}>🎲 Roll Monster Initiatives</button>
       </div>
-      <div className="card" style={{ marginBottom: 16 }}>
-        {combatants.map((c, i) => (
-          <div key={c.id} style={{
-            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-            borderBottom: i < combatants.length - 1 ? '1px solid var(--border)' : 'none',
-          }}>
-            <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{c.name}</div>
-              {c.initMod !== 0 && (
-                <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                  mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}
-                </div>
-              )}
-            </div>
-            <InitInput value={inits[c.id]} onChange={val => setInit(c.id, val)} />
+
+      {players.length > 0 && (
+        <>
+          <div className="section-heading">Players</div>
+          <div className="card" style={{ marginBottom: 12 }}>
+            {players.map((c, i) => (
+              <CombatantInitRow key={c.id} c={c} idx={i} isLast={i === players.length - 1} />
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
+
+      {monsters.length > 0 && (
+        <>
+          <div className="section-heading">Monsters</div>
+          <div className="card" style={{ marginBottom: 16 }}>
+            {monsters.map((c, i) => (
+              <CombatantInitRow key={c.id} c={c} idx={i} isLast={i === monsters.length - 1} />
+            ))}
+          </div>
+        </>
+      )}
+
       <button
         className="btn btn-accent btn-full"
         style={{ opacity: allSet ? 1 : 0.5 }}
