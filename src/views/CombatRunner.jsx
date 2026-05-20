@@ -430,6 +430,148 @@ function InitInput({ value, onChange, style = {} }) {
   );
 }
 
+// ─── Add Monster Modal ────────────────────────────────────────────────────────
+
+function AddMonsterModal({ monsters, onAdd, onClose }) {
+  const [search, setSearch]         = useState('');
+  const [selected, setSelected]     = useState(null);
+  const [initiative, setInitiative] = useState('');
+
+  const filtered = (monsters ?? []).filter(m =>
+    m.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  function handleRoll() {
+    if (!selected) return;
+    const mod    = dexMod(selected.abilities);
+    const rolled = Math.max(1, rollD20() + mod);
+    setInitiative(String(rolled));
+  }
+
+  function handleConfirm() {
+    const init = parseInt(initiative);
+    if (!selected || !init || init < 1) return;
+    onAdd(selected, init);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" style={{ maxWidth: 480 }}>
+        <div className="modal-header">
+          <span className="modal-title">Add Monster to Combat</span>
+          <button className="btn-icon" onClick={onClose}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="modal-body">
+          {/* Search */}
+          <div style={{ marginBottom: 10 }}>
+            <input
+              type="text"
+              placeholder="Search monsters…"
+              value={search}
+              autoFocus
+              onChange={e => { setSearch(e.target.value); setSelected(null); setInitiative(''); }}
+              style={{ width: '100%', padding: '8px 12px', fontSize: 13 }}
+            />
+          </div>
+
+          {/* Monster list */}
+          <div style={{
+            maxHeight: 240, overflowY: 'auto',
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            marginBottom: 16,
+          }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: 16, color: 'var(--text3)', fontSize: 13, textAlign: 'center' }}>
+                No monsters found.
+              </div>
+            ) : (
+              filtered.map((m, i) => {
+                const isSelected = selected?.id === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => { setSelected(m); setInitiative(''); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      width: '100%', padding: '9px 12px', textAlign: 'left',
+                      background: isSelected ? 'var(--accent-bg)' : 'transparent',
+                      border: 'none',
+                      borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none',
+                      cursor: 'pointer', transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--surface2)'; }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 13, fontWeight: isSelected ? 600 : 500,
+                        color: isSelected ? 'var(--accent-text)' : 'var(--text)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {m.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>
+                        {[m.type, m.cr !== undefined && `CR ${m.cr}`, m.hp && `${m.hp} HP`].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                    {isSelected && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--accent)', flexShrink: 0 }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* Initiative — shown once a monster is selected */}
+          {selected && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', marginBottom: 6 }}>
+                Initiative for {selected.name}
+                {dexMod(selected.abilities) !== 0 && (
+                  <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6, color: 'var(--text3)' }}>
+                    (DEX mod {dexMod(selected.abilities) >= 0 ? `+${dexMod(selected.abilities)}` : dexMod(selected.abilities)})
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="—"
+                  value={initiative}
+                  autoFocus
+                  onChange={e => setInitiative(clampInit(e.target.value))}
+                  style={{ width: 80, textAlign: 'center', fontFamily: 'DM Mono, monospace', fontSize: 18, fontWeight: 500 }}
+                />
+                <button className="btn btn-ghost btn-sm" onClick={handleRoll}>
+                  🎲 Roll
+                </button>
+              </div>
+            </div>
+          )}
+
+          <button
+            className="btn btn-accent btn-full"
+            onClick={handleConfirm}
+            disabled={!selected || !initiative || parseInt(initiative) < 1}
+          >
+            Add to Combat
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Action Modal — 3-step attack/heal flow ───────────────────────────────────
 
 function ActionModal({ attacker, combatants, onApply, onClose }) {
@@ -995,6 +1137,7 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
 
 export default function CombatRunner({
   encounters,
+  monsters,
   // All combat state is lifted to App.jsx to persist across tab switches
   screen, setScreen,
   selectedEncounter, setSelectedEncounter,
@@ -1006,6 +1149,7 @@ export default function CombatRunner({
   log, setLog,
 }) {
   const [actionModal, setActionModal] = useState(null);
+  const [addMonsterOpen, setAddMonsterOpen] = useState(false);
 
   const dragIdx     = useRef(null);
   const dragOverIdx = useRef(null);
@@ -1045,6 +1189,7 @@ export default function CombatRunner({
 
   function nextTurn() {
     setCombatants(prev => {
+      // Clear actsNextTurn on whoever is about to become active
       let next = turnIdx + 1;
       let newRound = round;
       if (next >= prev.length) { next = 0; newRound = round + 1; addLog(`── Round ${newRound} begins ──`, newRound); }
@@ -1057,7 +1202,8 @@ export default function CombatRunner({
       setTurnIdx(next);
       setRound(newRound);
       if (prev[next]) addLog(`${prev[next].name}'s turn`, newRound);
-      return prev;
+      // Clear actsNextTurn for the combatant now taking their turn
+      return prev.map((c, i) => i === next && c.actsNextTurn ? { ...c, actsNextTurn: false } : c);
     });
   }
 
@@ -1100,6 +1246,74 @@ export default function CombatRunner({
 
   function toggleExpanded(id) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
+  }
+
+  // ── Add Monster During Combat ──────────────────────────────────────────────
+
+  function addMonsterToCombat(monsterTemplate, initiative) {
+    const maxHp = monsterTemplate.hpFormula
+      ? rollDice(monsterTemplate.hpFormula)
+      : (monsterTemplate.hp ?? 10);
+
+    // Number the new monster if one with the same base name already exists
+    const sameBase = combatants.filter(
+      c => c.baseName === monsterTemplate.name || c.name === monsterTemplate.name
+    );
+    const name = sameBase.length > 0
+      ? `${monsterTemplate.name} ${sameBase.length + 1}`
+      : monsterTemplate.name;
+
+    const newCombatant = {
+      id: `mid-combat-${Date.now()}`,
+      sourceId: monsterTemplate.id,
+      groupKey: monsterTemplate.id,
+      type: 'monster',
+      name,
+      baseName: monsterTemplate.name,
+      maxHp,
+      damage: 0,
+      tempHp: 0,
+      ac: monsterTemplate.ac ?? 10,
+      speed: monsterTemplate.speed ?? 30,
+      initiative,
+      initMod: dexMod(monsterTemplate.abilities),
+      conditions: [],
+      spellSlots: monsterTemplate.spellSlots
+        ? JSON.parse(JSON.stringify(monsterTemplate.spellSlots))
+        : null,
+      usedSlots: {},
+      attacks: monsterTemplate.attacks ?? [],
+      spells: monsterTemplate.spells ?? [],
+      notes: monsterTemplate.notes ?? '',
+      abilities: monsterTemplate.abilities ?? null,
+      expanded: false,
+      cr: monsterTemplate.cr,
+      actsNextTurn: true,
+    };
+
+    setCombatants(prev => {
+      const next = [...prev];
+
+      // Find where this initiative score belongs in sorted order
+      let insertAt = next.length;
+      for (let i = 0; i < next.length; i++) {
+        if ((next[i].initiative ?? 0) < initiative) {
+          insertAt = i;
+          break;
+        }
+      }
+
+      // Never insert at or before the current turn — always act next turn
+      if (insertAt <= turnIdx) {
+        insertAt = turnIdx + 1;
+      }
+
+      next.splice(insertAt, 0, newCombatant);
+      return next;
+    });
+
+    addLog(`🐉 ${name} entered combat (initiative ${initiative})`, round);
+    setAddMonsterOpen(false);
   }
 
   // Updated: handles damage, healing, tempHp, and optional condition
@@ -1193,6 +1407,15 @@ export default function CombatRunner({
         />
       )}
 
+      {/* Add Monster modal */}
+      {addMonsterOpen && (
+        <AddMonsterModal
+          monsters={monsters ?? []}
+          onAdd={addMonsterToCombat}
+          onClose={() => setAddMonsterOpen(false)}
+        />
+      )}
+
       {/* Main combatant list — slightly narrower to give log more room */}
       <div style={{ flex: '0 0 auto', width: 'calc(100% - 340px)', minWidth: 0 }}>
 
@@ -1208,6 +1431,7 @@ export default function CombatRunner({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-accent" onClick={nextTurn}>Next Turn →</button>
+            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--text2)' }} onClick={() => setAddMonsterOpen(true)}>+ Monster</button>
             <button className="btn btn-ghost" style={{ color: 'var(--accent)' }} onClick={endCombat}>End Combat</button>
           </div>
         </div>
@@ -1256,7 +1480,19 @@ export default function CombatRunner({
                   <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
 
                   <div className="combatant-name-col">
-                    <div className="combatant-name">{c.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <div className="combatant-name">{c.name}</div>
+                      {c.actsNextTurn && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                          padding: '1px 7px', borderRadius: 99,
+                          background: '#f97316', color: '#fff',
+                          whiteSpace: 'nowrap', lineHeight: 1.7,
+                        }}>
+                          Acts next turn
+                        </span>
+                      )}
+                    </div>
                     {c.conditions.length > 0 && (
                       <div className="combatant-conditions">
                         {c.conditions.map(cond => <ConditionChip key={cond.id} condition={cond} />)}

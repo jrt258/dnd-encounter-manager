@@ -186,6 +186,7 @@ export default function App() {
           <div style={{ display: tab === 'combat' ? 'block' : 'none' }}>
             <CombatRunner
               encounters={encounters}
+              monsters={monsters}
               screen={combatScreen}
               setScreen={setCombatScreen}
               selectedEncounter={combatSelectedEncounter}
