@@ -184,12 +184,10 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
           <div className="spell-slots-grid">
             {Object.entries(m.spellSlots).map(([lvl, count]) =>
               count > 0 ? (
-                <div key={lvl} className="spell-slot-cell">
-                  <span className="spell-slot-label">Lvl {lvl}</span>
-                  <div className="spell-slot-pips">
-                    {Array.from({ length: count }).map((_, i) => (
-                      <div key={i} className="pip pip-full" />
-                    ))}
+                <div className="slot-level" key={lvl}>
+                  <span className="slot-level-label">Lvl {lvl}</span>
+                  <div className="slot-pips">
+                    {Array.from({ length: count }).map((_, i) => <div className="slot-pip" key={i} />)}
                   </div>
                 </div>
               ) : null
@@ -201,18 +199,16 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
       {m.spells?.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Spells</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {[...m.spells].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)).map(sp => {
-              const defLine = sp.defenseType === 'save'
-                ? `DC ${sp.saveDC} ${sp.saveAbility?.toUpperCase()} save`
-                : sp.defenseType === 'attack'
-                  ? `${modStr(sp.attackBonus ?? 0)} spell attack`
-                  : null;
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+            {[...m.spells].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)).map((sp, i) => {
+              let defLine = '';
+              if (sp.defenseType === 'save') defLine = `${sp.saveAbility?.toUpperCase()} Save DC ${sp.saveDC}${sp.onSave ? ` · ${sp.onSave} on save` : ''}`;
+              else if (sp.defenseType === 'attack') defLine = `${modStr(sp.attackBonus)} spell attack`;
               return (
-                <div key={sp.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>
+                <div key={sp.id ?? i} style={{ padding: '10px 14px', borderBottom: i < m.spells.length - 1 ? '1px solid var(--border)' : 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name}</span>
-                    <span className="tag tag-gray" style={{ fontSize: 9 }}>{sp.level === 0 ? 'Cantrip' : `Lvl ${sp.level}`}</span>
+                    <span className="tag tag-purple" style={{ fontSize: 9 }}>{sp.level === 0 ? 'Cantrip' : `Lvl ${sp.level}`}</span>
                     {sp.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
                     {sp.ritual && <span className="tag tag-blue" style={{ fontSize: 9 }}>ℛ Ritual</span>}
                   </div>
@@ -250,7 +246,7 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
   );
 }
 
-// ─── Encounter sidebar item ────────────────────────────────────────────────────
+// ─── Encounter sidebar item ───────────────────────────────────────────────────
 
 function EncounterItem({ enc, active, onSelect, onRename, onDuplicate, onDelete }) {
   const [renaming, setRenaming] = useState(false);
@@ -277,16 +273,17 @@ function EncounterItem({ enc, active, onSelect, onRename, onDuplicate, onDelete 
         padding: '12px 14px', borderRadius: 'var(--radius-sm)',
         background: active ? 'var(--accent-bg)' : 'var(--surface2)',
         border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-        cursor: 'pointer', transition: 'all 0.12s', marginBottom: 6,
+        marginBottom: 6, cursor: 'pointer', transition: 'all 0.15s',
       }}
     >
       {renaming ? (
-        <input autoFocus value={draft}
+        <input
+          autoFocus value={draft}
           onChange={e => setDraft(e.target.value)}
           onBlur={commitRename}
           onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setDraft(enc.name); setRenaming(false); } }}
           onClick={e => e.stopPropagation()}
-          style={{ width: '100%', fontSize: 13, fontWeight: 600, padding: '2px 4px', marginBottom: 6 }}
+          style={{ width: '100%', marginBottom: 8 }}
         />
       ) : (
         <div style={{ fontSize: 13, fontWeight: 600, color: active ? 'var(--accent-text)' : 'var(--text)', marginBottom: hasContent ? 4 : 8 }}>
@@ -310,7 +307,7 @@ function EncounterItem({ enc, active, onSelect, onRename, onDuplicate, onDelete 
   );
 }
 
-// ─── Main EncounterBuilder ─────────────────────────────────────────────────────
+// ─── Main EncounterBuilder ────────────────────────────────────────────────────
 
 export default function EncounterBuilder({
   monsters, setMonsters,
@@ -322,41 +319,57 @@ export default function EncounterBuilder({
   const [filterType, setFilterType] = useState('all');
   const [filterCr, setFilterCr]     = useState('all');
   const [previewMonster, setPreviewMonster] = useState(null);
-
-  // Monster create/edit modal state
-  const [monsterEditing, setMonsterEditing] = useState(null); // null | 'new' | monster object
-
-  // Player create/edit modal state
-  const [playerEditing, setPlayerEditing] = useState(null); // null | 'new' | player object
+  const [monsterEditing, setMonsterEditing] = useState(null);
+  const [playerEditing, setPlayerEditing]   = useState(null);
 
   const allTypes = useMemo(() => {
     const types = [...new Set(monsters.map(m => m.type).filter(Boolean))].sort();
     return ['all', ...types];
   }, [monsters]);
 
-  // ── Monster CRUD (writes to shared library) ───────────────────────────────
+  // ── Monster CRUD — also syncs snapshots in all encounter entries ──────────
 
   function saveMonster(data) {
     if (monsterEditing === 'new') {
-      const newMonster = { ...data, id: Date.now().toString(), maxHp: data.hp };
-      setMonsters(prev => [...prev, newMonster]);
+      const saved = { ...data, id: Date.now().toString(), maxHp: data.hp };
+      setMonsters(prev => [...prev, saved]);
     } else if (monsterEditing?.isDefault) {
-      // Save with the original default ID so App.jsx's merge logic suppresses the default entry
-      setMonsters(prev => [...prev, { ...data, id: monsterEditing.id, isDefault: false, maxHp: data.hp }]);
+      const saved = { ...data, id: Date.now().toString(), isDefault: false, maxHp: data.hp };
+      setMonsters(prev => [...prev, saved]);
     } else {
-      setMonsters(prev => prev.map(m => m.id === monsterEditing.id ? { ...monsterEditing, ...data, maxHp: data.hp } : m));
+      const saved = { ...monsterEditing, ...data, maxHp: data.hp };
+      setMonsters(prev => prev.map(m => m.id === monsterEditing.id ? saved : m));
+      // Keep encounter entry snapshots in sync so the builder UI stays accurate
+      setEncounters(prev => prev.map(enc => ({
+        ...enc,
+        entries: enc.entries.map(entry =>
+          entry.type === 'monster' && entry.sourceId === monsterEditing.id
+            ? { ...entry, monster: saved, name: saved.name }
+            : entry
+        ),
+      })));
     }
     setMonsterEditing(null);
   }
 
-  // ── Player CRUD (writes to shared library) ────────────────────────────────
+  // ── Player CRUD — also syncs snapshots in all encounter entries ───────────
 
   function savePlayer(data) {
     if (playerEditing === 'new') {
-      const newPlayer = { ...data, id: Date.now().toString(), maxHp: data.hp };
-      setPlayers(prev => [...prev, newPlayer]);
+      const saved = { ...data, id: Date.now().toString(), maxHp: data.hp };
+      setPlayers(prev => [...prev, saved]);
     } else {
-      setPlayers(prev => prev.map(p => p.id === playerEditing.id ? { ...playerEditing, ...data, maxHp: data.hp } : p));
+      const saved = { ...playerEditing, ...data, maxHp: data.hp };
+      setPlayers(prev => prev.map(p => p.id === playerEditing.id ? saved : p));
+      // Keep encounter entry snapshots in sync
+      setEncounters(prev => prev.map(enc => ({
+        ...enc,
+        entries: enc.entries.map(entry =>
+          entry.type === 'player' && entry.sourceId === playerEditing.id
+            ? { ...entry, player: saved, name: saved.name }
+            : entry
+        ),
+      })));
     }
     setPlayerEditing(null);
   }
@@ -390,7 +403,7 @@ export default function EncounterBuilder({
     });
   }
 
-  // ── Active encounter entries ───────────────────────────────────────────────
+  // ── Active encounter entries ──────────────────────────────────────────────
 
   const activeEncounter = encounters.find(e => e.id === activeEncounterId) ?? null;
 
@@ -451,7 +464,6 @@ export default function EncounterBuilder({
 
   return (
     <>
-      {/* Monster card preview */}
       {previewMonster && (
         <MonsterCard
           monster={previewMonster}
@@ -461,7 +473,6 @@ export default function EncounterBuilder({
         />
       )}
 
-      {/* Monster create/edit modal */}
       {monsterEditing !== null && (
         <Modal
           title={monsterEditing === 'new' ? 'New Monster' : `Edit ${monsterEditing?.name ?? 'Monster'}`}
@@ -475,7 +486,6 @@ export default function EncounterBuilder({
         </Modal>
       )}
 
-      {/* Player create/edit modal */}
       {playerEditing !== null && (
         <Modal
           title={playerEditing === 'new' ? 'New Character' : `Edit ${playerEditing?.name ?? 'Character'}`}
@@ -544,15 +554,23 @@ export default function EncounterBuilder({
                         <div className="list-row-main">
                           <div className="list-row-title">{p.name}</div>
                           <div className="list-row-sub">
-                            {[p.class, p.level ? `Lvl ${p.level}` : null, p.hp ? `${p.hp} HP` : null].filter(Boolean).join(' · ')}
+                            {[p.class, p.level ? `Level ${p.level}` : null].filter(Boolean).join(' · ')}
                           </div>
                         </div>
+                        <button className="btn-icon" title="Edit player"
+                          onClick={() => setPlayerEditing(p)}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </button>
                         <button
-                          className={`btn btn-ghost btn-sm${added ? ' disabled' : ''}`}
+                          className="btn btn-ghost btn-sm"
+                          style={added ? { color: 'var(--text3)', cursor: 'default' } : {}}
                           onClick={() => !added && addPlayer(p)}
                           disabled={added}
                         >
-                          {added ? 'Added' : '+ Add'}
+                          {added ? '✓ Added' : '+ Add'}
                         </button>
                       </div>
                     );
@@ -566,27 +584,22 @@ export default function EncounterBuilder({
                 <button className="btn btn-ghost btn-sm" onClick={() => setMonsterEditing('new')}>+ New Monster</button>
               </div>
 
-              {/* Search + filters */}
               <div style={{ marginBottom: 10 }}>
-                <div className="search-bar" style={{ marginBottom: 8 }}>
-                  <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-                  </svg>
-                  <input
-                    type="text"
-                    placeholder="Search monsters…"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                  <div className="search-bar" style={{ flex: 1 }}>
+                    <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                    </svg>
+                    <input type="text" placeholder="Search monsters…" value={search} onChange={e => setSearch(e.target.value)} />
+                  </div>
                   {hasActiveFilters && (
-                    <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, color: 'var(--accent)', padding: '2px 8px' }}
+                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent)', flexShrink: 0 }}
                       onClick={() => { setSearch(''); setFilterType('all'); setFilterCr('all'); }}>
                       Clear
                     </button>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 5 }}>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
                   {CR_BRACKETS.map(b => (
                     <FilterPill key={b.value} label={b.label} active={filterCr === b.value}
                       onClick={() => setFilterCr(filterCr === b.value ? 'all' : b.value)} />
@@ -699,6 +712,7 @@ export default function EncounterBuilder({
             </>
           )}
         </div>
+
       </div>
     </>
   );

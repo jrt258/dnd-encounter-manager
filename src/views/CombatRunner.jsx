@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -70,24 +70,32 @@ function modStr(n) { return n >= 0 ? `+${n}` : String(n); }
 function condId(c) { return typeof c === 'string' ? c : c.id; }
 function condTurns(c) { return typeof c === 'string' ? null : (c.turnsLeft ?? null); }
 
-function buildCombatants(entries) {
+// Resolve the freshest monster/player data: live library first, snapshot fallback.
+function resolveMonster(entry, monsterMap) {
+  return (monsterMap && monsterMap.get(entry.sourceId)) ?? entry.monster ?? {};
+}
+function resolvePlayer(entry, playerMap) {
+  return (playerMap && playerMap.get(entry.sourceId)) ?? entry.player ?? {};
+}
+
+function buildCombatants(entries, monsterMap, playerMap) {
   const result = [];
   for (const entry of entries) {
     if (entry.type === 'player') {
-      const p = entry.player;
+      const p = resolvePlayer(entry, playerMap);
       result.push({
         id: `${entry.id}-0`,
         sourceId: entry.sourceId,
         type: 'player',
-        name: p.name,
-        maxHp: p.hp ?? 10,
+        name: p.name ?? entry.name ?? 'Unknown',
+        maxHp: p.hp ?? p.maxHp ?? 10,
         damage: 0,
+        tempHp: 0,
         ac: p.ac ?? 10,
         speed: p.speed ?? 30,
         initiative: null,
         initMod: dexMod(p.abilities) + (p.initiativeMod ?? 0),
         conditions: [],
-        tempHp: 0,
         spellSlots: p.spellSlots ? JSON.parse(JSON.stringify(p.spellSlots)) : null,
         usedSlots: {},
         attacks: p.attacks ?? [],
@@ -97,26 +105,26 @@ function buildCombatants(entries) {
         expanded: false,
       });
     } else if (entry.type === 'monster') {
-      const m = entry.monster;
+      const m = resolveMonster(entry, monsterMap);
       const count = entry.count || 1;
       const groupInitMod = dexMod(m.abilities) + (m.initiativeMod ?? 0);
       for (let i = 0; i < count; i++) {
-        const maxHp = m.hpFormula ? rollDice(m.hpFormula) : (m.hp ?? 10);
+        const maxHp = m.hpFormula ? rollDice(m.hpFormula) : (m.hp ?? m.maxHp ?? 10);
         result.push({
           id: `${entry.id}-${i}`,
           sourceId: entry.sourceId,
           groupKey: entry.sourceId,
           type: 'monster',
-          name: count > 1 ? `${m.name} ${i + 1}` : m.name,
-          baseName: m.name,
+          name: count > 1 ? `${m.name ?? entry.name} ${i + 1}` : (m.name ?? entry.name ?? 'Unknown'),
+          baseName: m.name ?? entry.name ?? 'Unknown',
           maxHp,
           damage: 0,
+          tempHp: 0,
           ac: m.ac ?? 10,
           speed: m.speed ?? 30,
           initiative: null,
           initMod: groupInitMod,
           conditions: [],
-          tempHp: 0,
           spellSlots: m.spellSlots ? JSON.parse(JSON.stringify(m.spellSlots)) : null,
           usedSlots: {},
           attacks: m.attacks ?? [],
@@ -710,7 +718,35 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
 
 // ─── Encounter select ─────────────────────────────────────────────────────────
 
-function EncounterSelectScreen({ encounters, onSelect }) {
+// Detect stale snapshots in an encounter's entries by comparing key fields against live library.
+function detectStaleEntries(entries, monsterMap, playerMap) {
+  const stale = [];
+  for (const entry of entries) {
+    if (entry.type === 'monster') {
+      const live = monsterMap?.get(entry.sourceId);
+      const snap = entry.monster;
+      if (!live) continue; // deleted from library — can't verify
+      const snapHp   = snap?.hp ?? snap?.maxHp;
+      const liveHp   = live.hp ?? live.maxHp;
+      const snapName = snap?.name;
+      if (snapHp !== liveHp || snapName !== live.name || snap?.ac !== live.ac) {
+        stale.push({ name: snap?.name ?? live.name, live, snap });
+      }
+    } else if (entry.type === 'player') {
+      const live = playerMap?.get(entry.sourceId);
+      const snap = entry.player;
+      if (!live) continue;
+      const snapHp = snap?.hp ?? snap?.maxHp;
+      const liveHp = live.hp ?? live.maxHp;
+      if (snapHp !== liveHp || snap?.name !== live.name || snap?.ac !== live.ac) {
+        stale.push({ name: snap?.name ?? live.name, live, snap });
+      }
+    }
+  }
+  return stale;
+}
+
+function EncounterSelectScreen({ encounters, onSelect, monsterMap, playerMap }) {
   if (!encounters?.length) {
     return (
       <div className="empty-state">
@@ -724,17 +760,45 @@ function EncounterSelectScreen({ encounters, onSelect }) {
     <div style={{ maxWidth: 520 }}>
       <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 12 }}>Select an Encounter</div>
       <div className="card">
-        {encounters.map(enc => (
-          <div key={enc.id} className="list-row" style={{ cursor: 'pointer' }} onClick={() => onSelect(enc)}>
-            <div className="list-row-main">
-              <div className="list-row-title">{enc.name || 'Unnamed Encounter'}</div>
-              <div className="list-row-sub">{enc.entries?.length ?? 0} entries</div>
+        {encounters.map(enc => {
+          const stale = detectStaleEntries(enc.entries ?? [], monsterMap, playerMap);
+          const monsterCount = enc.entries?.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0) ?? 0;
+          const playerCount  = enc.entries?.filter(e => e.type === 'player').length ?? 0;
+          const parts = [];
+          if (monsterCount > 0) parts.push(`${monsterCount} monster${monsterCount !== 1 ? 's' : ''}`);
+          if (playerCount > 0)  parts.push(`${playerCount} player${playerCount !== 1 ? 's' : ''}`);
+          return (
+            <div key={enc.id} className="list-row" style={{ cursor: 'pointer', flexDirection: 'column', alignItems: 'stretch', gap: 4 }}
+              onClick={() => onSelect(enc)}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="list-row-main">
+                  <div className="list-row-title">{enc.name || 'Unnamed Encounter'}</div>
+                  <div className="list-row-sub">{parts.length ? parts.join(' · ') : 'Empty'}</div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </div>
+              {stale.length > 0 && (
+                <div style={{
+                  fontSize: 11, color: '#b45309',
+                  background: '#fef3c7', border: '1px solid #fde68a',
+                  borderRadius: 6, padding: '5px 8px', marginTop: 2,
+                  display: 'flex', alignItems: 'flex-start', gap: 6,
+                }}>
+                  <span style={{ flexShrink: 0 }}>⚠️</span>
+                  <span>
+                    <strong>Stats out of sync</strong> — {stale.map(s => s.name).join(', ')} {stale.length === 1 ? 'has' : 'have'} been edited in the library.
+                    Combat will use the <em>updated</em> stats automatically.
+                  </span>
+                </div>
+              )}
             </div>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)' }}>
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </div>
-        ))}
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text3)' }}>
+        Stats are always pulled fresh from your library when you start combat.
       </div>
     </div>
   );
@@ -882,6 +946,8 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
 
 export default function CombatRunner({
   encounters,
+  monsters,          // live library — used to resolve fresh stats
+  players,           // live library
   screen,            setScreen,
   selectedEncounter, setSelectedEncounter,
   initiativeMode,    setInitiativeMode,
@@ -892,6 +958,10 @@ export default function CombatRunner({
   log,               setLog,
 }) {
   const [actionModal, setActionModal] = useState(null);
+
+  // Build fast lookup maps from live library arrays
+  const monsterMap = useMemo(() => new Map((monsters ?? []).map(m => [m.id, m])), [monsters]);
+  const playerMap  = useMemo(() => new Map((players  ?? []).map(p => [p.id, p])), [players]);
 
   const dragIdx     = useRef(null);
   const dragOverIdx = useRef(null);
@@ -904,7 +974,7 @@ export default function CombatRunner({
 
   function handleSelectEncounter(enc) {
     setSelectedEncounter(enc);
-    setPendingCombatants(buildCombatants(enc.entries));
+    setPendingCombatants(buildCombatants(enc.entries, monsterMap, playerMap));
     setScreen('mode');
   }
 
@@ -1084,7 +1154,7 @@ export default function CombatRunner({
 
   // ── Screens ────────────────────────────────────────────────────────────────
 
-  if (screen === 'select')     return <EncounterSelectScreen encounters={encounters} onSelect={handleSelectEncounter} />;
+  if (screen === 'select')     return <EncounterSelectScreen encounters={encounters} onSelect={handleSelectEncounter} monsterMap={monsterMap} playerMap={playerMap} />;
   if (screen === 'mode')       return <InitiativeModeScreen encounter={selectedEncounter} onConfirm={handleConfirmMode} onBack={() => setScreen('select')} />;
   if (screen === 'initiative') return <InitiativeInputScreen combatants={pendingCombatants} initiativeMode={initiativeMode} onStart={handleStartCombat} onBack={() => setScreen('mode')} />;
 
