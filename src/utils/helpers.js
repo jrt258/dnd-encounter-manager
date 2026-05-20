@@ -6,18 +6,6 @@ export function rollD20() {
   return Math.floor(Math.random() * 20) + 1
 }
 
-export function rollDice(notation) {
-  if (!notation) return 0
-  const match = notation.trim().match(/^(\d*)d(\d+)([+-]\d+)?$/i)
-  if (!match) return 0
-  const count = parseInt(match[1] || '1')
-  const sides = parseInt(match[2])
-  const mod   = parseInt(match[3] || '0')
-  let total = mod
-  for (let i = 0; i < count; i++) total += Math.floor(Math.random() * sides) + 1
-  return Math.max(0, total)
-}
-
 export function abilityMod(score) {
   return Math.floor((score - 10) / 2)
 }
@@ -97,8 +85,8 @@ export const EMPTY_SPELL = {
   components: { v: true, s: true, m: false },
   material: '',
   duration: 'Instantaneous',
-  defenseType: 'none',     // 'none' | 'save' | 'attack'
-  saveAbility: 'dex',      // which ability for saves
+  defenseType: 'none',
+  saveAbility: 'dex',
   saveDC: 14,
   attackBonus: 5,
   onSave: 'half damage',
