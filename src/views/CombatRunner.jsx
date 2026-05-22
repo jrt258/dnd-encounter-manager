@@ -96,7 +96,7 @@ function buildCombatants(entries) {
       const count = entry.count || 1;
       const groupInitMod = dexMod(m.abilities) + (m.initiativeMod ?? 0);
       for (let i = 0; i < count; i++) {
-        const maxHp = m.hpFormula ? rollDice(m.hpFormula) : (m.hp ?? 10);
+        const maxHp = m.hp ?? 10;
         result.push({
           id: `${entry.id}-${i}`,
           sourceId: entry.sourceId,
@@ -1251,9 +1251,7 @@ export default function CombatRunner({
   // ── Add Monster During Combat ──────────────────────────────────────────────
 
   function addMonsterToCombat(monsterTemplate, initiative) {
-    const maxHp = monsterTemplate.hpFormula
-      ? rollDice(monsterTemplate.hpFormula)
-      : (monsterTemplate.hp ?? 10);
+    const maxHp = monsterTemplate.hp ?? 10;
 
     // Number the new monster if one with the same base name already exists
     const sameBase = combatants.filter(
