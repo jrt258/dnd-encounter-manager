@@ -121,7 +121,7 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20,
         background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: 12 }}>
         {[
-          { label: 'Hit Points',  value: m.hp ?? '—', sub: m.hpFormula ? `(${m.hpFormula})` : null },
+          { label: 'Max HP',      value: m.hp ?? '—' },
           { label: 'Armor Class', value: m.ac ?? '—' },
           { label: 'Speed',       value: m.speed ? `${m.speed} ft` : '—' },
         ].map(s => (
@@ -333,22 +333,28 @@ export default function EncounterBuilder({
     if (monsterEditing === 'new') {
       const saved = { ...data, id: Date.now().toString(), maxHp: data.hp };
       setMonsters(prev => [...prev, saved]);
-    } else if (monsterEditing?.isDefault) {
-      const saved = { ...data, id: Date.now().toString(), isDefault: false, maxHp: data.hp };
-      setMonsters(prev => [...prev, saved]);
-    } else {
-      const saved = { ...monsterEditing, ...data, maxHp: data.hp };
-      setMonsters(prev => prev.map(m => m.id === monsterEditing.id ? saved : m));
-      // Keep encounter entry snapshots in sync so the builder UI stays accurate
-      setEncounters(prev => prev.map(enc => ({
-        ...enc,
-        entries: enc.entries.map(entry =>
-          entry.type === 'monster' && entry.sourceId === monsterEditing.id
-            ? { ...entry, monster: saved, name: saved.name }
-            : entry
-        ),
-      })));
+      setMonsterEditing(null);
+      return;
     }
+    // Editing an existing monster — user-created OR a default. Defaults are
+    // overwritten in place by reusing their id (App's merge then suppresses the
+    // built-in default and shows this user copy), so encounter entries that
+    // reference the id stay linked.
+    const id = monsterEditing.id;
+    const saved = { ...monsterEditing, ...data, id, isDefault: false, maxHp: data.hp };
+    setMonsters(prev => {
+      const exists = prev.some(m => m.id === id);
+      return exists ? prev.map(m => m.id === id ? saved : m) : [...prev, saved];
+    });
+    // Keep encounter entry snapshots in sync so the builder UI stays accurate
+    setEncounters(prev => prev.map(enc => ({
+      ...enc,
+      entries: enc.entries.map(entry =>
+        entry.type === 'monster' && entry.sourceId === id
+          ? { ...entry, monster: saved, name: saved.name }
+          : entry
+      ),
+    })));
     setMonsterEditing(null);
   }
 
@@ -444,6 +450,23 @@ export default function EncounterBuilder({
     if (!activeEncounter?.entries?.length) return;
     if (!confirm('Clear all combatants from this encounter?')) return;
     updateEntries(() => []);
+  }
+
+  // Pull the latest library version into this encounter's monster snapshots.
+  function syncActiveFromLibrary() {
+    if (!activeEncounter) return;
+    const monsterEntries = activeEncounter.entries.filter(e => e.type === 'monster');
+    const updatable = monsterEntries.filter(e => monsters.some(m => m.id === e.sourceId));
+    const missing = monsterEntries.length - updatable.length;
+    updateEntries(entries => entries.map(e => {
+      if (e.type !== 'monster') return e;
+      const lib = monsters.find(m => m.id === e.sourceId);
+      return lib ? { ...e, name: lib.name, monster: JSON.parse(JSON.stringify(lib)) } : e;
+    }));
+    alert(
+      `Synced ${updatable.length} monster${updatable.length !== 1 ? 's' : ''} from the library`
+      + (missing > 0 ? ` · ${missing} not found, left unchanged.` : '.')
+    );
   }
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -660,6 +683,15 @@ export default function EncounterBuilder({
                   </span>
                 )}
               </div>
+              {monsterEntries.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <button className="btn btn-ghost btn-sm" style={{ color: 'var(--accent)' }}
+                    onClick={syncActiveFromLibrary}
+                    title="Pull the latest library stats into this encounter's monsters">
+                    🔄 Sync from Library
+                  </button>
+                </div>
+              )}
               {entries.length === 0 ? (
                 <div className="card">
                   <div className="empty-state" style={{ padding: 28 }}>

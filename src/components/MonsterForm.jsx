@@ -98,7 +98,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
           {/* HP + AC + Speed + Initiative */}
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
-              <div className="field-label">Hit Points</div>
+              <div className="field-label">Max HP</div>
               <input
                 type="number"
                 min={1}

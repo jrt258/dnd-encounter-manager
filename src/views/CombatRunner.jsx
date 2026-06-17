@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
+import Modal from '../components/Modal';
+import MonsterForm from '../components/MonsterForm';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -120,11 +122,89 @@ function buildCombatants(entries) {
           abilities: m.abilities ?? null,
           expanded: false,
           cr: m.cr,
+          diverged: false,
+          template: JSON.parse(JSON.stringify(m)),
         });
       }
     }
   }
   return result;
+}
+
+// ─── Library sync helpers ─────────────────────────────────────────────────────
+
+// Recompute a monster's initiative modifier from its template.
+function monsterInitMod(m) {
+  return dexMod(m?.abilities) + (m?.initiativeMod ?? 0);
+}
+
+// Clamp expended spell slots so none exceed the (possibly new) totals.
+function clampUsedSlots(usedSlots, spellSlots) {
+  const next = {};
+  if (!spellSlots) return next;
+  for (const [lvl, total] of Object.entries(spellSlots)) {
+    const used = usedSlots?.[lvl] ?? 0;
+    if (total > 0 && used > 0) next[lvl] = Math.min(used, total);
+  }
+  return next;
+}
+
+// Re-number an instance name when its base (library) name changes,
+// preserving any " 2"/" 3" suffix the instance already had.
+function renameFromBase(currentName, oldBase, newBase) {
+  if (oldBase && currentName.startsWith(oldBase)) {
+    return newBase + currentName.slice(oldBase.length);
+  }
+  return newBase;
+}
+
+// Field-merge a library template onto a live combatant.
+// Template-level stats are overwritten; transient combat state is preserved:
+// damage, tempHp, conditions, initiative, expanded, and (clamped) usedSlots.
+function applyTemplateToCombatant(c, tmpl) {
+  const spellSlots = tmpl.spellSlots ? JSON.parse(JSON.stringify(tmpl.spellSlots)) : null;
+  const maxHp = tmpl.hp ?? c.maxHp;
+  return {
+    ...c,
+    name: renameFromBase(c.name, c.baseName, tmpl.name),
+    baseName: tmpl.name,
+    maxHp,
+    damage: Math.min(c.damage ?? 0, maxHp), // keep damage taken, but never exceed new max
+    ac: tmpl.ac ?? 10,
+    speed: tmpl.speed ?? 30,
+    initMod: monsterInitMod(tmpl),
+    spellSlots,
+    usedSlots: clampUsedSlots(c.usedSlots, spellSlots),
+    attacks: tmpl.attacks ?? [],
+    spells: tmpl.spells ?? [],
+    notes: tmpl.notes ?? '',
+    abilities: tmpl.abilities ?? null,
+    cr: tmpl.cr,
+    template: JSON.parse(JSON.stringify(tmpl)),
+    diverged: false,
+  };
+}
+
+// Build a monster-shaped object (for the edit form) from a live combatant,
+// using its stored template as the base for fields not tracked per-instance.
+function combatantToMonster(c) {
+  const base = c.template ?? {};
+  return {
+    ...base,
+    id: c.sourceId,
+    name: c.baseName ?? c.name,
+    hp: c.maxHp,
+    maxHp: c.maxHp,
+    ac: c.ac,
+    speed: c.speed,
+    initiativeMod: base.initiativeMod ?? 0,
+    abilities: c.abilities ?? base.abilities ?? null,
+    attacks: c.attacks ?? [],
+    spells: c.spells ?? [],
+    spellSlots: c.spellSlots ?? {},
+    notes: c.notes ?? '',
+    cr: c.cr ?? base.cr,
+  };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -1137,7 +1217,9 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
 
 export default function CombatRunner({
   encounters,
+  setEncounters,
   monsters,
+  setMonsters,
   // All combat state is lifted to App.jsx to persist across tab switches
   screen, setScreen,
   selectedEncounter, setSelectedEncounter,
@@ -1150,6 +1232,9 @@ export default function CombatRunner({
 }) {
   const [actionModal, setActionModal] = useState(null);
   const [addMonsterOpen, setAddMonsterOpen] = useState(false);
+  // Full-stat edit of a single instance, and the follow-up "push to library?" prompt
+  const [editingCombatant, setEditingCombatant] = useState(null); // combatant object | null
+  const [pushPrompt, setPushPrompt] = useState(null);             // { combatantId, sourceId, data } | null
 
   const dragIdx     = useRef(null);
   const dragOverIdx = useRef(null);
@@ -1248,6 +1333,93 @@ export default function CombatRunner({
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
   }
 
+  // ── Library sync / per-instance edit / push ────────────────────────────────
+
+  // Pull the current library version into every non-diverged monster instance.
+  function syncFromLibrary() {
+    const affected = combatants.filter(
+      c => c.type === 'monster' && !c.diverged && monsters.some(m => m.id === c.sourceId)
+    );
+    if (affected.length === 0) {
+      addLog('🔄 Sync: no instances to update (all are diverged or unlinked).', round);
+      return;
+    }
+    setCombatants(prev => prev.map(c => {
+      if (c.type !== 'monster' || c.diverged) return c;
+      const lib = monsters.find(m => m.id === c.sourceId);
+      return lib ? applyTemplateToCombatant(c, lib) : c;
+    }));
+    addLog(`🔄 Synced ${affected.length} instance${affected.length !== 1 ? 's' : ''} from the library.`, round);
+  }
+
+  // Open the full-stat editor for one instance.
+  function openEditCombatant(c) {
+    setEditingCombatant(c);
+  }
+
+  // MonsterForm save: apply edits to this instance, then ask whether to push.
+  function saveCombatantEdit(data) {
+    if (!editingCombatant) return;
+    const target = editingCombatant;
+    setCombatants(prev => prev.map(c => c.id === target.id ? applyTemplateToCombatant(c, data) : c));
+    setEditingCombatant(null);
+    setPushPrompt({
+      combatantId: target.id,
+      sourceId: data.id ?? target.sourceId,
+      data,
+    });
+  }
+
+  // Push the edited stats to the library, the encounter snapshot, and all
+  // non-diverged instances of the same monster.
+  function confirmPush() {
+    if (!pushPrompt) return;
+    const { sourceId, data, combatantId } = pushPrompt;
+    const libEntry = { ...data, id: sourceId, isDefault: false };
+
+    // 1. Library: overwrite in place (defaults included), or add if missing.
+    setMonsters(prev => {
+      const exists = prev.some(m => m.id === sourceId);
+      return exists
+        ? prev.map(m => m.id === sourceId ? libEntry : m)
+        : [...prev, libEntry];
+    });
+
+    // 2. Encounter snapshot for the encounter being run.
+    if (setEncounters && selectedEncounter?.id) {
+      setEncounters(prev => prev.map(enc =>
+        enc.id !== selectedEncounter.id ? enc : {
+          ...enc,
+          entries: enc.entries.map(e =>
+            (e.type === 'monster' && e.sourceId === sourceId)
+              ? { ...e, name: libEntry.name, monster: JSON.parse(JSON.stringify(libEntry)) }
+              : e
+          ),
+        }
+      ));
+    }
+
+    // 3. Live instances: edited one + all non-diverged siblings.
+    setCombatants(prev => prev.map(c =>
+      (c.type === 'monster' && c.sourceId === sourceId && (!c.diverged || c.id === combatantId))
+        ? applyTemplateToCombatant(c, libEntry)
+        : c
+    ));
+
+    addLog(`📚 Pushed "${libEntry.name}" to the library and synced its instances.`, round);
+    setPushPrompt(null);
+  }
+
+  // Keep the edit on this instance only; flag it so future syncs skip it.
+  function declinePush() {
+    if (!pushPrompt) return;
+    const { combatantId } = pushPrompt;
+    setCombatants(prev => prev.map(c => c.id === combatantId ? { ...c, diverged: true } : c));
+    const edited = combatants.find(c => c.id === combatantId);
+    addLog(`✏️ ${edited?.name ?? 'Instance'} edited for this combat only (won't sync).`, round);
+    setPushPrompt(null);
+  }
+
   // ── Add Monster During Combat ──────────────────────────────────────────────
 
   function addMonsterToCombat(monsterTemplate, initiative) {
@@ -1286,6 +1458,8 @@ export default function CombatRunner({
       abilities: monsterTemplate.abilities ?? null,
       expanded: false,
       cr: monsterTemplate.cr,
+      diverged: false,
+      template: JSON.parse(JSON.stringify(monsterTemplate)),
       actsNextTurn: true,
     };
 
@@ -1414,6 +1588,33 @@ export default function CombatRunner({
         />
       )}
 
+      {/* Edit a single instance — full stat form */}
+      {editingCombatant && (
+        <Modal title={`Edit ${editingCombatant.name}`} onClose={() => setEditingCombatant(null)} wide>
+          <MonsterForm
+            initial={combatantToMonster(editingCombatant)}
+            onSave={saveCombatantEdit}
+            onClose={() => setEditingCombatant(null)}
+          />
+        </Modal>
+      )}
+
+      {/* Push-to-library prompt (shown after an instance edit is saved) */}
+      {pushPrompt && (
+        <Modal title="Push changes to the library?" onClose={declinePush}>
+          <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 18 }}>
+            Save <strong style={{ color: 'var(--text)' }}>{pushPrompt.data.name}</strong> to the Monster Library?
+            This updates the library template and applies the new stats to every other instance of this monster
+            in the current combat — current HP, conditions, and initiative are preserved. Choose
+            “Just this instance” to keep the change here only; it will be marked <em>Edited</em> and skipped by Sync.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <button className="btn btn-ghost" onClick={declinePush}>Just this instance</button>
+            <button className="btn btn-accent" onClick={confirmPush}>Push to library &amp; sync</button>
+          </div>
+        </Modal>
+      )}
+
       {/* Main combatant list — slightly narrower to give log more room */}
       <div style={{ flex: '0 0 auto', width: 'calc(100% - 340px)', minWidth: 0 }}>
 
@@ -1429,6 +1630,10 @@ export default function CombatRunner({
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-accent" onClick={nextTurn}>Next Turn →</button>
+            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--text2)' }} onClick={syncFromLibrary}
+              title="Pull the latest library stats into all non-edited instances (preserves current HP & conditions)">
+              🔄 Sync
+            </button>
             <button className="btn btn-ghost btn-sm" style={{ color: 'var(--text2)' }} onClick={() => setAddMonsterOpen(true)}>+ Monster</button>
             <button className="btn btn-ghost" style={{ color: 'var(--accent)' }} onClick={endCombat}>End Combat</button>
           </div>
@@ -1490,6 +1695,17 @@ export default function CombatRunner({
                           Acts next turn
                         </span>
                       )}
+                      {c.diverged && (
+                        <span title="Edited for this combat only — Sync and pushes won't overwrite it"
+                          style={{
+                            fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                            padding: '1px 7px', borderRadius: 99,
+                            background: 'var(--amber-bg, #fef3c7)', color: 'var(--amber-text, #92400e)',
+                            whiteSpace: 'nowrap', lineHeight: 1.7,
+                          }}>
+                          Edited
+                        </span>
+                      )}
                     </div>
                     {c.conditions.length > 0 && (
                       <div className="combatant-conditions">
@@ -1535,6 +1751,18 @@ export default function CombatRunner({
                       Action
                     </button>
                   </div>
+
+                  {c.type === 'monster' && (
+                    <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 4 }}>
+                      <button className="btn-icon" title="Edit full stats for this monster"
+                        onClick={() => openEditCombatant(c)} style={{ flexShrink: 0 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
 
                   <div className="combatant-chevron" onClick={() => toggleExpanded(c.id)}
                     title={c.expanded ? 'Collapse' : 'Expand'}>
