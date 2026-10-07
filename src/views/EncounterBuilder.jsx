@@ -19,9 +19,10 @@ const CR_XP = {
   '6': 2300, '7': 2900, '8': 3900, '9': 5000, '10': 5900,
 };
 
+// Allies fight for the party, so they don't contribute to the encounter's XP.
 function encounterXp(entries) {
   return entries
-    .filter(e => e.type === 'monster')
+    .filter(e => e.type === 'monster' && !e.monster?.isAlly)
     .reduce((sum, e) => sum + ((CR_XP[String(e.monster?.cr ?? 0)] ?? 0) * (e.count || 1)), 0);
 }
 
@@ -116,6 +117,7 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
         {m.cr !== undefined && m.cr !== '' && <span className="tag tag-amber">CR {crLabel(m.cr)}</span>}
         {m.size && <span className="tag tag-gray">{m.size}</span>}
         {m.isDefault && <span className="tag tag-blue" style={{ fontSize: 9 }}>SRD</span>}
+        {m.isAlly && <span className="tag tag-green" style={{ fontSize: 9 }}>Ally</span>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 20,
@@ -259,11 +261,13 @@ function EncounterItem({ enc, active, onSelect, onRename, onDuplicate, onDelete 
     setRenaming(false);
   }
 
-  const monsterCount = enc.entries.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0);
+  const monsterCount = enc.entries.filter(e => e.type === 'monster' && !e.monster?.isAlly).reduce((s, e) => s + (e.count || 1), 0);
+  const allyCount    = enc.entries.filter(e => e.type === 'monster' && e.monster?.isAlly).reduce((s, e) => s + (e.count || 1), 0);
   const playerCount  = enc.entries.filter(e => e.type === 'player').length;
-  const hasContent   = monsterCount > 0 || playerCount > 0;
+  const hasContent   = monsterCount > 0 || allyCount > 0 || playerCount > 0;
   const parts = [];
   if (monsterCount > 0) parts.push(`${monsterCount} monster${monsterCount !== 1 ? 's' : ''}`);
+  if (allyCount > 0)    parts.push(`${allyCount} ${allyCount !== 1 ? 'allies' : 'ally'}`);
   if (playerCount > 0)  parts.push(`${playerCount} player${playerCount !== 1 ? 's' : ''}`);
 
   return (
@@ -643,11 +647,12 @@ export default function EncounterBuilder({
                   filteredMonsters.map(m => (
                     <div className="list-row" key={m.id} style={{ cursor: 'pointer' }}
                       onClick={() => setPreviewMonster(m)}>
-                      <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                      <div className="combatant-dot dot-monster"
+                        style={{ flexShrink: 0, ...(m.isAlly ? { background: 'var(--green)' } : {}) }} />
                       <div className="list-row-main">
                         <div className="list-row-title">{m.name}</div>
                         <div className="list-row-sub">
-                          {m.type || 'Monster'}
+                          {m.isAlly ? 'Ally · ' : ''}{m.type || 'Monster'}
                           {m.cr !== undefined && m.cr !== '' ? ` · CR ${crLabel(m.cr)}` : ''}
                           {` · ${m.hp ?? '—'} HP · ${m.ac ?? '—'} AC`}
                         </div>
@@ -713,12 +718,13 @@ export default function EncounterBuilder({
                   ))}
                   {monsterEntries.map(e => (
                     <div className="list-row" key={e.id}>
-                      <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                      <div className="combatant-dot dot-monster"
+                        style={{ flexShrink: 0, ...(e.monster?.isAlly ? { background: 'var(--green)' } : {}) }} />
                       <div className="list-row-main" style={{ cursor: 'pointer' }}
                         onClick={() => setPreviewMonster(e.monster)}>
                         <div className="list-row-title">{e.name}</div>
                         <div className="list-row-sub">
-                          CR {crLabel(e.monster?.cr)} · {e.monster?.hp ?? '—'} HP · {e.monster?.ac ?? '—'} AC
+                          {e.monster?.isAlly ? 'Ally · ' : ''}CR {crLabel(e.monster?.cr)} · {e.monster?.hp ?? '—'} HP · {e.monster?.ac ?? '—'} AC
                         </div>
                       </div>
                       <div className="list-row-right">

@@ -74,6 +74,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
   const [sortDir, setSortDir]       = useState('asc');
   const [filterType, setFilterType] = useState('all');
   const [filterCr, setFilterCr]     = useState('all');
+  const [filterAlly, setFilterAlly] = useState(false);
 
   const allTypes = useMemo(() => {
     const types = [...new Set(monsters.map(m => m.type).filter(Boolean))].sort();
@@ -133,6 +134,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
       if (!m.name.toLowerCase().includes(search.toLowerCase())) return false;
       if (filterType !== 'all' && m.type !== filterType) return false;
       if (!matchesCrFilter(m.cr, filterCr)) return false;
+      if (filterAlly && !m.isAlly) return false;
       return true;
     })
     .sort((a, b) => {
@@ -145,7 +147,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
       return 0;
     });
 
-  const hasActiveFilters = filterType !== 'all' || filterCr !== 'all' || search !== '';
+  const hasActiveFilters = filterType !== 'all' || filterCr !== 'all' || search !== '' || filterAlly;
 
   return (
     <>
@@ -171,7 +173,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
             <button
               className="btn btn-ghost btn-sm"
               style={{ color: 'var(--accent)', flexShrink: 0 }}
-              onClick={() => { setSearch(''); setFilterType('all'); setFilterCr('all'); }}
+              onClick={() => { setSearch(''); setFilterType('all'); setFilterCr('all'); setFilterAlly(false); }}
             >
               Clear filters
             </button>
@@ -192,6 +194,11 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
 
         {/* Type filter pills */}
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          <FilterPill
+            label="★ Allies"
+            active={filterAlly}
+            onClick={() => setFilterAlly(a => !a)}
+          />
           {allTypes.map(t => (
             <FilterPill
               key={t}
@@ -249,6 +256,9 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                         <div className="table-name">{m.name}</div>
                         {m.isDefault && (
                           <span className="tag tag-blue" style={{ fontSize: 9 }}>SRD</span>
+                        )}
+                        {m.isAlly && (
+                          <span className="tag tag-green" style={{ fontSize: 9 }}>Ally</span>
                         )}
                       </div>
                       {m.size && <div className="table-sub">{m.size}</div>}

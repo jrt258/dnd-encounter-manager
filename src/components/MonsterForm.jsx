@@ -95,6 +95,30 @@ export default function MonsterForm({ initial, onSave, onClose }) {
             </div>
           </div>
 
+          {/* Ally toggle */}
+          <label style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer',
+            padding: '9px 12px', borderRadius: 'var(--radius-sm)',
+            border: `1px solid ${data.isAlly ? 'var(--green)' : 'var(--border)'}`,
+            background: data.isAlly ? 'var(--green-bg)' : 'var(--surface2)',
+            userSelect: 'none',
+          }}>
+            <input
+              type="checkbox"
+              checked={!!data.isAlly}
+              onChange={e => set('isAlly', e.target.checked)}
+              style={{ width: 'auto', marginTop: 2, accentColor: 'var(--green)' }}
+            />
+            <span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: data.isAlly ? 'var(--green-text)' : 'var(--text)' }}>
+                Ally
+              </span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>
+                Fights alongside the players. In combat it is grouped with allies and can roll initiative as a group.
+              </span>
+            </span>
+          </label>
+
           {/* HP + AC + Speed + Initiative */}
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
