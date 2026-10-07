@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import MonsterForm from '../components/MonsterForm';
 import Modal from '../components/Modal';
+import { uid } from '../utils/helpers';
 
 const CR_BRACKETS = [
   { label: 'All CR', value: 'all' },
@@ -90,9 +91,28 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
     else { setSortCol(col); setSortDir('asc'); }
   }
 
+  // Build an editable copy of a monster. It has no id yet (one is assigned on save),
+  // is never flagged as an SRD default, and gets fresh ids on attacks/spells so the
+  // copy shares nothing with the original.
+  function startClone(monster) {
+    const copy = JSON.parse(JSON.stringify(monster));
+    delete copy.id;
+    delete copy.isDefault;
+    setEffectiveEditing({
+      ...copy,
+      name: `${monster.name} (Copy)`,
+      attacks: (copy.attacks ?? []).map(a => ({ ...a, id: uid() })),
+      spells: (copy.spells ?? []).map(s => ({ ...s, id: uid() })),
+      isClone: true,
+    });
+  }
+
   function saveMonster(data) {
     if (effectiveEditing === 'new') {
       setMonsters(prev => [...prev, { ...data, id: Date.now().toString() }]);
+    } else if (effectiveEditing?.isClone) {
+      const { isClone, ...rest } = data;
+      setMonsters(prev => [...prev, { ...rest, id: uid(), isDefault: false }]);
     } else if (effectiveEditing?.isDefault) {
       // Save with the original default ID so App.jsx's merge logic suppresses the default entry
       setMonsters(prev => [...prev, { ...data, id: effectiveEditing.id, isDefault: false }]);
@@ -213,7 +233,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                 <th onClick={() => handleSort('ac')} className={sortCol === 'ac' ? 'sorted' : ''} style={{ textAlign: 'center' }}>
                   AC <SortIcon col="ac" sortCol={sortCol} sortDir={sortDir} />
                 </th>
-                <th style={{ width: 80 }}></th>
+                <th style={{ width: 110 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -243,6 +263,12 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </button>
+                        <button className="btn-icon" title="Clone" onClick={() => startClone(m)}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                           </svg>
                         </button>
                         {!m.isDefault && (
@@ -319,7 +345,11 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
 
       {effectiveEditing !== null && (
         <Modal
-          title={effectiveEditing === 'new' ? 'New Monster' : `Edit ${effectiveEditing.name}`}
+          title={
+            effectiveEditing === 'new' ? 'New Monster'
+              : effectiveEditing.isClone ? 'Clone Monster'
+              : `Edit ${effectiveEditing.name}`
+          }
           onClose={() => setEffectiveEditing(null)}
         >
           <MonsterForm
