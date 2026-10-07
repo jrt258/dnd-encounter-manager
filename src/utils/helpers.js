@@ -46,6 +46,7 @@ export const EMPTY_MONSTER = {
   spells: [],
   spellSlots: {},
   notes: '',
+  isAlly: false,
 }
 
 export const EMPTY_PLAYER = {

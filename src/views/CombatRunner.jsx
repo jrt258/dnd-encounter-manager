@@ -67,6 +67,41 @@ function clampInit(val) {
   return String(Math.max(1, n));
 }
 
+// ── Sides ────────────────────────────────────────────────────────────────────
+// Every combatant belongs to one of three sides. Allies are monsters flagged
+// `isAlly` in the library; they fight for the party but roll as their own group.
+
+const SIDES = [
+  { id: 'player', label: 'Players' },
+  { id: 'ally',   label: 'Allies'  },
+  { id: 'enemy',  label: 'Enemies' },
+];
+
+const SIDE_RANK = { player: 0, ally: 1, enemy: 2 };
+
+function sideOf(c) {
+  if (c.type === 'player') return 'player';
+  return c.isAlly ? 'ally' : 'enemy';
+}
+
+// Inline override so allies get a green dot without needing a new CSS class.
+function sideDotStyle(c) {
+  return sideOf(c) === 'ally' ? { background: 'var(--green)' } : {};
+}
+
+// A single initiative roll, floored at 1 (the input fields don't accept lower).
+function rollInit(mod) {
+  return Math.max(1, rollD20() + (mod ?? 0));
+}
+
+// One roll shared by a whole group: a single d20 plus the group's best modifier,
+// so every member ends up with the same number and acts together.
+function rollGroupInit(members) {
+  if (members.length === 0) return null;
+  const bestMod = Math.max(...members.map(c => c.initMod ?? 0));
+  return rollInit(bestMod);
+}
+
 function buildCombatants(entries) {
   const result = [];
   for (const entry of entries) {
@@ -104,6 +139,7 @@ function buildCombatants(entries) {
           sourceId: entry.sourceId,
           groupKey: entry.sourceId,
           type: 'monster',
+          isAlly: !!m.isAlly,
           name: count > 1 ? `${m.name} ${i + 1}` : m.name,
           baseName: m.name,
           maxHp,
@@ -166,6 +202,7 @@ function applyTemplateToCombatant(c, tmpl) {
   const maxHp = tmpl.hp ?? c.maxHp;
   return {
     ...c,
+    isAlly: !!tmpl.isAlly,
     name: renameFromBase(c.name, c.baseName, tmpl.name),
     baseName: tmpl.name,
     maxHp,
@@ -587,7 +624,8 @@ function AddMonsterModal({ monsters, onAdd, onClose }) {
                     onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--surface2)'; }}
                     onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <div className="combatant-dot dot-monster" style={{ flexShrink: 0 }} />
+                    <div className="combatant-dot dot-monster"
+                      style={{ flexShrink: 0, ...(m.isAlly ? { background: 'var(--green)' } : {}) }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         fontSize: 13, fontWeight: isSelected ? 600 : 500,
@@ -595,6 +633,9 @@ function AddMonsterModal({ monsters, onAdd, onClose }) {
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                       }}>
                         {m.name}
+                        {m.isAlly && (
+                          <span className="tag tag-green" style={{ fontSize: 9, marginLeft: 6 }}>Ally</span>
+                        )}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>
                         {[m.type, m.cr !== undefined && `CR ${m.cr}`, m.hp && `${m.hp} HP`].filter(Boolean).join(' · ')}
@@ -670,9 +711,10 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
   const spells  = (attacker.spells ?? []).filter(s => s.effect || s.damage);
   const hasActions = attacks.length > 0 || spells.length > 0;
 
-  const players  = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0 && c.type === 'player');
-  const monsters = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0 && c.type === 'monster');
   const targets  = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0);
+  const players  = targets.filter(c => sideOf(c) === 'player');
+  const allies   = targets.filter(c => sideOf(c) === 'ally');
+  const enemies  = targets.filter(c => sideOf(c) === 'enemy');
 
   function rollDamageExpr(expr) {
     if (!expr) return { total: 0, breakdown: '0' };
@@ -731,7 +773,8 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
         onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
         onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
       >
-        <div className={`combatant-dot ${t.type === 'player' ? 'dot-player' : 'dot-monster'}`} style={{ flexShrink: 0 }} />
+        <div className={`combatant-dot ${t.type === 'player' ? 'dot-player' : 'dot-monster'}`}
+          style={{ flexShrink: 0, ...sideDotStyle(t) }} />
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{t.name}</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
@@ -891,11 +934,19 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
                       </div>
                     </>
                   )}
-                  {monsters.length > 0 && (
+                  {allies.length > 0 && (
                     <>
-                      <div className="section-heading" style={{ marginTop: players.length > 0 ? 4 : 0 }}>Monsters</div>
+                      <div className="section-heading" style={{ marginTop: players.length > 0 ? 4 : 0 }}>Allies</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {monsters.map(t => <TargetButton key={t.id} t={t} />)}
+                        {allies.map(t => <TargetButton key={t.id} t={t} />)}
+                      </div>
+                    </>
+                  )}
+                  {enemies.length > 0 && (
+                    <>
+                      <div className="section-heading" style={{ marginTop: (players.length > 0 || allies.length > 0) ? 4 : 0 }}>Enemies</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {enemies.map(t => <TargetButton key={t.id} t={t} />)}
                       </div>
                     </>
                   )}
@@ -912,7 +963,8 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
               {/* Summary */}
               <div style={{ background: 'var(--surface2)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 16,
                 display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div className={`combatant-dot ${selectedTarget.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
+                <div className={`combatant-dot ${selectedTarget.type === 'player' ? 'dot-player' : 'dot-monster'}`}
+                  style={sideDotStyle(selectedTarget)} />
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{selectedTarget.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace' }}>
@@ -1048,7 +1100,8 @@ function EncounterSelectScreen({ encounters, onSelect }) {
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{enc.name}</div>
               <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
-                {enc.entries.filter(e => e.type === 'monster').reduce((s, e) => s + (e.count || 1), 0)} monsters ·{' '}
+                {enc.entries.filter(e => e.type === 'monster' && !e.monster?.isAlly).reduce((s, e) => s + (e.count || 1), 0)} monsters ·{' '}
+                {enc.entries.filter(e => e.type === 'monster' && e.monster?.isAlly).reduce((s, e) => s + (e.count || 1), 0)} allies ·{' '}
                 {enc.entries.filter(e => e.type === 'player').length} players
               </div>
             </div>
@@ -1066,9 +1119,9 @@ function EncounterSelectScreen({ encounters, onSelect }) {
 
 function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
   const modes = [
-    { id: 'individual', label: 'Individual', desc: 'Each monster rolls separately' },
+    { id: 'individual', label: 'Individual', desc: 'Each monster and ally rolls separately' },
     { id: 'group',      label: 'By Group',   desc: 'All of the same type share one roll' },
-    { id: 'single',     label: 'Single Roll', desc: 'All monsters share one roll' },
+    { id: 'side',       label: 'By Side',    desc: 'Players, allies, and enemies each share one roll' },
   ];
   return (
     <div style={{ maxWidth: 400 }}>
@@ -1103,6 +1156,73 @@ function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
 
 // ─── Initiative Input ─────────────────────────────────────────────────────────
 
+// Defined at module level (not inside InitiativeInputScreen) so the number
+// input keeps focus while you type instead of remounting on every keystroke.
+function CombatantInitRow({ c, value, onChange, isLast }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+      borderBottom: !isLast ? '1px solid var(--border)' : 'none',
+    }}>
+      <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`}
+        style={sideDotStyle(c)} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{c.name}</div>
+        {c.initMod !== 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+            mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}
+          </div>
+        )}
+      </div>
+      <InitInput value={value} onChange={onChange} />
+    </div>
+  );
+}
+
+// Header for one side (Players / Allies / Enemies) with its group-roll controls.
+function SideHeader({ label, count, onRollGroup, onSetGroup }) {
+  const [val, setVal] = useState('');
+
+  function handleSet() {
+    if (val === '') return;
+    onSetGroup(val);
+    setVal('');
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+      <span className="section-heading" style={{ margin: 0 }}>
+        {label}
+        <span style={{ marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'var(--text3)' }}>
+          ({count})
+        </span>
+      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <InitInput
+          value={val}
+          onChange={setVal}
+          style={{ width: 56, padding: '3px 6px', fontSize: 12 }}
+        />
+        <button
+          className="btn btn-ghost btn-sm"
+          disabled={val === ''}
+          onClick={handleSet}
+          title={`Give every ${label.toLowerCase().replace(/s$/, '')} this same initiative (for a group roll made at the table)`}
+        >
+          Set all
+        </button>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={onRollGroup}
+          title="One d20 plus the group's best initiative modifier — everyone in the group gets the same number"
+        >
+          🎲 Roll as Group
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) {
   const [inits, setInits] = useState(() => {
     const m = {};
@@ -1112,88 +1232,100 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
 
   function setInit(id, val) { setInits(prev => ({ ...prev, [id]: val })); }
 
+  // Give every member of one side the same initiative value.
+  function fillSide(sideId, value) {
+    const v = String(value);
+    setInits(prev => {
+      const next = { ...prev };
+      combatants.forEach(c => { if (sideOf(c) === sideId) next[c.id] = v; });
+      return next;
+    });
+  }
+
+  function rollSide(sideId) {
+    const roll = rollGroupInit(combatants.filter(c => sideOf(c) === sideId));
+    if (roll != null) fillSide(sideId, roll);
+  }
+
+  function setSide(sideId, raw) {
+    const v = clampInit(raw);
+    if (v !== '') fillSide(sideId, v);
+  }
+
+  // Top-bar roll button; behaviour follows the mode picked on the previous screen.
   function rollAll() {
     const next = { ...inits };
+    const monsters = combatants.filter(c => c.type === 'monster'); // enemies + allies
+
     if (initiativeMode === 'individual') {
-      combatants.forEach(c => {
-        if (c.type === 'monster') next[c.id] = String(rollD20() + c.initMod);
-      });
+      monsters.forEach(c => { next[c.id] = String(rollInit(c.initMod)); });
     } else if (initiativeMode === 'group') {
+      // One roll per monster type, kept separate for allies vs. enemies.
       const rolled = {};
-      combatants.forEach(c => {
-        if (c.type === 'monster') {
-          if (!rolled[c.groupKey ?? c.baseName]) rolled[c.groupKey ?? c.baseName] = rollD20() + c.initMod;
-          next[c.id] = String(rolled[c.groupKey ?? c.baseName]);
-        }
+      monsters.forEach(c => {
+        const key = `${sideOf(c)}:${c.groupKey ?? c.baseName}`;
+        if (rolled[key] === undefined) rolled[key] = rollInit(c.initMod);
+        next[c.id] = String(rolled[key]);
       });
     } else {
-      const roll = rollD20();
-      combatants.forEach(c => { if (c.type === 'monster') next[c.id] = String(roll + c.initMod); });
+      // 'side': players, allies, and enemies each share one roll.
+      SIDES.forEach(s => {
+        const members = combatants.filter(c => sideOf(c) === s.id);
+        const roll = rollGroupInit(members);
+        if (roll != null) members.forEach(c => { next[c.id] = String(roll); });
+      });
     }
     setInits(next);
   }
-
-  const players  = combatants.filter(c => c.type === 'player');
-  const monsters = combatants.filter(c => c.type === 'monster');
 
   const allSet = combatants.every(c => inits[c.id] !== '' && parseInt(inits[c.id]) >= 1);
 
   function handleStart() {
     if (!allSet) return;
+    // Ties go players → allies → enemies, which also keeps a group that rolled
+    // together acting together.
     const sorted = combatants
       .map(c => ({ ...c, initiative: parseInt(inits[c.id]) }))
-      .sort((a, b) => b.initiative - a.initiative);
+      .sort((a, b) =>
+        (b.initiative - a.initiative) || (SIDE_RANK[sideOf(a)] - SIDE_RANK[sideOf(b)])
+      );
     onStart(sorted);
-  }
-
-  function CombatantInitRow({ c, idx, isLast }) {
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-        borderBottom: !isLast ? '1px solid var(--border)' : 'none',
-      }}>
-        <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{c.name}</div>
-          {c.initMod !== 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-              mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}
-            </div>
-          )}
-        </div>
-        <InitInput value={inits[c.id]} onChange={val => setInit(c.id, val)} />
-      </div>
-    );
   }
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <button className="btn btn-ghost btn-sm" onClick={onBack}>← Back</button>
-        <button className="btn btn-ghost btn-sm" onClick={rollAll}>🎲 Roll Monster Initiatives</button>
+        <button className="btn btn-ghost btn-sm" onClick={rollAll}>
+          {initiativeMode === 'side' ? '🎲 Roll All Groups' : '🎲 Roll Monster & Ally Initiatives'}
+        </button>
       </div>
 
-      {players.length > 0 && (
-        <>
-          <div className="section-heading">Players</div>
-          <div className="card" style={{ marginBottom: 12 }}>
-            {players.map((c, i) => (
-              <CombatantInitRow key={c.id} c={c} idx={i} isLast={i === players.length - 1} />
-            ))}
+      {SIDES.map(s => {
+        const members = combatants.filter(c => sideOf(c) === s.id);
+        if (members.length === 0) return null;
+        return (
+          <div key={s.id} style={{ marginBottom: 16 }}>
+            <SideHeader
+              label={s.label}
+              count={members.length}
+              onRollGroup={() => rollSide(s.id)}
+              onSetGroup={val => setSide(s.id, val)}
+            />
+            <div className="card">
+              {members.map((c, i) => (
+                <CombatantInitRow
+                  key={c.id}
+                  c={c}
+                  value={inits[c.id]}
+                  onChange={val => setInit(c.id, val)}
+                  isLast={i === members.length - 1}
+                />
+              ))}
+            </div>
           </div>
-        </>
-      )}
-
-      {monsters.length > 0 && (
-        <>
-          <div className="section-heading">Monsters</div>
-          <div className="card" style={{ marginBottom: 16 }}>
-            {monsters.map((c, i) => (
-              <CombatantInitRow key={c.id} c={c} idx={i} isLast={i === monsters.length - 1} />
-            ))}
-          </div>
-        </>
-      )}
+        );
+      })}
 
       <button
         className="btn btn-accent btn-full"
@@ -1438,6 +1570,7 @@ export default function CombatRunner({
       sourceId: monsterTemplate.id,
       groupKey: monsterTemplate.id,
       type: 'monster',
+      isAlly: !!monsterTemplate.isAlly,
       name,
       baseName: monsterTemplate.name,
       maxHp,
@@ -1680,11 +1813,15 @@ export default function CombatRunner({
                   </div>
 
                   <div className="combatant-init" title="Initiative">{c.initiative ?? '—'}</div>
-                  <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`} />
+                  <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`}
+                    style={sideDotStyle(c)} />
 
                   <div className="combatant-name-col">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <div className="combatant-name">{c.name}</div>
+                      {c.isAlly && (
+                        <span className="tag tag-green" style={{ fontSize: 9 }}>Ally</span>
+                      )}
                       {c.actsNextTurn && (
                         <span style={{
                           fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
