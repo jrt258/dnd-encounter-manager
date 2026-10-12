@@ -89,9 +89,13 @@ function sideDotStyle(c) {
   return sideOf(c) === 'ally' ? { background: 'var(--green)' } : {};
 }
 
-// A single initiative roll, floored at 1 (the input fields don't accept lower).
+// A single initiative roll: the raw d20 face plus a modifier. The total is
+// floored at 1 (the input fields don't accept lower); `die` is kept so the
+// initiative screen can show what actually came up on the d20.
 function rollInit(mod) {
-  return Math.max(1, rollD20() + (mod ?? 0));
+  const die = rollD20();
+  const m = mod ?? 0;
+  return { die, mod: m, total: Math.max(1, die + m) };
 }
 
 // One roll shared by a whole group: a single d20 plus the group's best modifier,
@@ -100,6 +104,10 @@ function rollGroupInit(members) {
   if (members.length === 0) return null;
   const bestMod = Math.max(...members.map(c => c.initMod ?? 0));
   return rollInit(bestMod);
+}
+
+function fmtMod(mod) {
+  return mod >= 0 ? `+${mod}` : String(mod);
 }
 
 function buildCombatants(entries) {
@@ -1158,7 +1166,13 @@ function InitiativeModeScreen({ encounter, onConfirm, onBack }) {
 
 // Defined at module level (not inside InitiativeInputScreen) so the number
 // input keeps focus while you type instead of remounting on every keystroke.
-function CombatantInitRow({ c, value, onChange, isLast }) {
+// `roll` is the d20 breakdown behind the current value ({ die, mod, group }),
+// or null when the value was typed in by hand.
+function CombatantInitRow({ c, value, roll, onChange, onRoll, isLast }) {
+  const isNat20 = roll?.die === 20;
+  const isNat1  = roll?.die === 1;
+  const rollColor = isNat20 ? 'var(--green)' : isNat1 ? 'var(--accent)' : 'var(--text2)';
+
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
@@ -1166,14 +1180,29 @@ function CombatantInitRow({ c, value, onChange, isLast }) {
     }}>
       <div className={`combatant-dot ${c.type === 'player' ? 'dot-player' : 'dot-monster'}`}
         style={sideDotStyle(c)} />
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{c.name}</div>
-        {c.initMod !== 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-            mod {c.initMod >= 0 ? `+${c.initMod}` : c.initMod}
-          </div>
-        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 10px', fontSize: 11, color: 'var(--text3)' }}>
+          {c.initMod !== 0 && <span>mod {fmtMod(c.initMod)}</span>}
+          {roll && (
+            <span style={{ fontFamily: 'DM Mono, monospace', color: rollColor }}
+              title={roll.group ? 'Shared group roll — uses the group\'s best modifier' : 'Individual roll'}>
+              d20 <strong>{roll.die}</strong> {fmtMod(roll.mod)}
+              {roll.group && <span style={{ color: 'var(--text3)' }}> (group)</span>}
+              {isNat20 && ' · nat 20'}
+              {isNat1 && ' · nat 1'}
+            </span>
+          )}
+        </div>
       </div>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ flexShrink: 0 }}
+        onClick={onRoll}
+        title={`Roll a d20 for ${c.name} and add their modifier (${fmtMod(c.initMod ?? 0)})`}
+      >
+        🎲 d20
+      </button>
       <InitInput value={value} onChange={onChange} />
     </div>
   );
@@ -1230,52 +1259,102 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
     return m;
   });
 
-  function setInit(id, val) { setInits(prev => ({ ...prev, [id]: val })); }
+  // d20 breakdown behind each value: { [id]: { die, mod, group } }.
+  // Cleared for a combatant whenever their value is typed or set by hand.
+  const [rolls, setRolls] = useState({});
 
-  // Give every member of one side the same initiative value.
-  function fillSide(sideId, value) {
-    const v = String(value);
-    setInits(prev => {
+  function clearRolls(ids) {
+    setRolls(prev => {
       const next = { ...prev };
-      combatants.forEach(c => { if (sideOf(c) === sideId) next[c.id] = v; });
+      ids.forEach(id => { delete next[id]; });
       return next;
     });
   }
 
-  function rollSide(sideId) {
-    const roll = rollGroupInit(combatants.filter(c => sideOf(c) === sideId));
-    if (roll != null) fillSide(sideId, roll);
+  function setInit(id, val) {
+    setInits(prev => ({ ...prev, [id]: val }));
+    clearRolls([id]);
   }
 
+  // Per-combatant roll: one d20 plus this combatant's own modifier.
+  // Available in every mode, so anyone can re-roll on their own even after a
+  // group or side roll.
+  function rollOne(c) {
+    const r = rollInit(c.initMod);
+    setInits(prev => ({ ...prev, [c.id]: String(r.total) }));
+    setRolls(prev => ({ ...prev, [c.id]: { die: r.die, mod: r.mod, group: false } }));
+  }
+
+  function sideMembers(sideId) {
+    return combatants.filter(c => sideOf(c) === sideId);
+  }
+
+  function rollSide(sideId) {
+    const members = sideMembers(sideId);
+    const r = rollGroupInit(members);
+    if (r == null) return;
+    const v = String(r.total);
+    setInits(prev => {
+      const next = { ...prev };
+      members.forEach(c => { next[c.id] = v; });
+      return next;
+    });
+    setRolls(prev => {
+      const next = { ...prev };
+      members.forEach(c => { next[c.id] = { die: r.die, mod: r.mod, group: true }; });
+      return next;
+    });
+  }
+
+  // Give every member of one side the same typed-in value (a roll made at the table).
   function setSide(sideId, raw) {
     const v = clampInit(raw);
-    if (v !== '') fillSide(sideId, v);
+    if (v === '') return;
+    const members = sideMembers(sideId);
+    setInits(prev => {
+      const next = { ...prev };
+      members.forEach(c => { next[c.id] = v; });
+      return next;
+    });
+    clearRolls(members.map(c => c.id));
   }
 
   // Top-bar roll button; behaviour follows the mode picked on the previous screen.
   function rollAll() {
     const next = { ...inits };
+    const nextRolls = { ...rolls };
     const monsters = combatants.filter(c => c.type === 'monster'); // enemies + allies
 
     if (initiativeMode === 'individual') {
-      monsters.forEach(c => { next[c.id] = String(rollInit(c.initMod)); });
+      monsters.forEach(c => {
+        const r = rollInit(c.initMod);
+        next[c.id] = String(r.total);
+        nextRolls[c.id] = { die: r.die, mod: r.mod, group: false };
+      });
     } else if (initiativeMode === 'group') {
       // One roll per monster type, kept separate for allies vs. enemies.
       const rolled = {};
       monsters.forEach(c => {
         const key = `${sideOf(c)}:${c.groupKey ?? c.baseName}`;
         if (rolled[key] === undefined) rolled[key] = rollInit(c.initMod);
-        next[c.id] = String(rolled[key]);
+        const r = rolled[key];
+        next[c.id] = String(r.total);
+        nextRolls[c.id] = { die: r.die, mod: r.mod, group: true };
       });
     } else {
       // 'side': players, allies, and enemies each share one roll.
       SIDES.forEach(s => {
-        const members = combatants.filter(c => sideOf(c) === s.id);
-        const roll = rollGroupInit(members);
-        if (roll != null) members.forEach(c => { next[c.id] = String(roll); });
+        const members = sideMembers(s.id);
+        const r = rollGroupInit(members);
+        if (r == null) return;
+        members.forEach(c => {
+          next[c.id] = String(r.total);
+          nextRolls[c.id] = { die: r.die, mod: r.mod, group: true };
+        });
       });
     }
     setInits(next);
+    setRolls(nextRolls);
   }
 
   const allSet = combatants.every(c => inits[c.id] !== '' && parseInt(inits[c.id]) >= 1);
@@ -1318,7 +1397,9 @@ function InitiativeInputScreen({ combatants, initiativeMode, onStart, onBack }) 
                   key={c.id}
                   c={c}
                   value={inits[c.id]}
+                  roll={rolls[c.id] ?? null}
                   onChange={val => setInit(c.id, val)}
+                  onRoll={() => rollOne(c)}
                   isLast={i === members.length - 1}
                 />
               ))}
