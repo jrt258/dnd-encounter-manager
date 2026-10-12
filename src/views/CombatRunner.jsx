@@ -1505,6 +1505,25 @@ export default function CombatRunner({
     });
   }
 
+  // Step back one turn, mirroring nextTurn: skips downed combatants and drops
+  // back a round when wrapping past the top of the order. Never goes earlier
+  // than the first turn of round 1.
+  function prevTurn() {
+    if (combatants.length === 0) return;
+    let prev = turnIdx;
+    let newRound = round;
+    let safety = 0;
+    do {
+      prev -= 1;
+      if (prev < 0) { prev = combatants.length - 1; newRound -= 1; }
+      safety++;
+    } while ((combatants[prev].maxHp - combatants[prev].damage) <= 0 && safety < combatants.length);
+    if (newRound < 1) return;
+    setTurnIdx(prev);
+    setRound(newRound);
+    addLog(`↩ Back to ${combatants[prev].name}'s turn`, newRound);
+  }
+
   function updateCombatant(id, changes) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, ...changes } : c));
   }
@@ -1779,6 +1798,8 @@ export default function CombatRunner({
   // ── Combat screen ──────────────────────────────────────────────────────────
 
   const activeCombatant = combatants[turnIdx];
+  // Going back is possible unless this is the first living combatant's turn in round 1.
+  const canGoBack = round > 1 || combatants.slice(0, turnIdx).some(c => (c.maxHp - c.damage) > 0);
 
   return (
     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -1843,6 +1864,11 @@ export default function CombatRunner({
             <div className="combat-active-name">{activeCombatant?.name ?? '—'}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" onClick={prevTurn} disabled={!canGoBack}
+              style={{ opacity: canGoBack ? 1 : 0.5 }}
+              title={canGoBack ? 'Go back to the previous turn' : 'Already at the first turn of combat'}>
+              ← Prev Turn
+            </button>
             <button className="btn btn-accent" onClick={nextTurn}>Next Turn →</button>
             <button className="btn btn-ghost btn-sm" style={{ color: 'var(--text2)' }} onClick={syncFromLibrary}
               title="Pull the latest library stats into all non-edited instances (preserves current HP & conditions)">
