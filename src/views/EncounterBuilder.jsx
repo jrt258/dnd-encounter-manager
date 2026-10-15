@@ -5,7 +5,8 @@ import PlayerForm from '../components/PlayerForm';
 import SpellcastingBlock from '../components/SpellcastingBlock';
 import AttacksBlock from '../components/AttacksBlock';
 import MonsterTraitsBlock from '../components/MonsterTraitsBlock';
-import { normalizeMonster, hasDefenses } from '../utils/helpers';
+import AbilityGrid from '../components/AbilityGrid';
+import { normalizeMonster, hasDefenses, otherSpeeds } from '../utils/helpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,6 @@ function matchesCrFilter(cr, filter) {
   return Math.abs(n - parseFloat(filter)) < 0.001;
 }
 
-function modStr(mod) { return mod >= 0 ? `+${mod}` : String(mod); }
 
 const CR_BRACKETS = [
   { label: 'All CR', value: 'all' },
@@ -112,7 +112,6 @@ function FilterPill({ label, active, onClick }) {
 
 function MonsterCard({ monster, onClose, onAdd, onEdit }) {
   const m = normalizeMonster(monster);
-  const ABILITY_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
 
   return (
     <Modal title={m.name} onClose={onClose} wide>
@@ -129,7 +128,8 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
         {[
           { label: 'Max HP',      value: m.hp ?? '—' },
           { label: 'Armor Class', value: m.ac ?? '—' },
-          { label: 'Speed',       value: m.speed ? `${m.speed} ft` : '—' },
+          { label: 'Speed',       value: m.speed ? `${m.speed} ft` : '—',
+            sub: otherSpeeds(m).map(t => `${t.id} ${t.value}`).join(' · ') || undefined },
         ].map(s => (
           <div key={s.label} style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text3)', marginBottom: 2 }}>{s.label}</div>
@@ -142,19 +142,7 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
       {m.abilities && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Ability Scores</div>
-          <div className="ability-grid">
-            {['str','dex','con','int','wis','cha'].map(ab => {
-              const score = m.abilities[ab] ?? 10;
-              const mod   = Math.floor((score - 10) / 2);
-              return (
-                <div className="ability-cell" key={ab}>
-                  <span className="ability-name">{ABILITY_LABELS[ab]}</span>
-                  <span className="ability-score">{score}</span>
-                  <span className="ability-mod">{modStr(mod)}</span>
-                </div>
-              );
-            })}
-          </div>
+          <AbilityGrid abilities={m.abilities} saves={m.saves} showSaves />
         </div>
       )}
 

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import NumberInput from './NumberInput'
 import {
   uid, EMPTY_ATTACK, EMPTY_DAMAGE_PART, EMPTY_MULTIATTACK, MAX_EXTRA_DAMAGE, DAMAGE_TYPES,
   normalizeAttack, diceAverage, attackDamageText, attackKindLabel, attackReachText,
@@ -92,13 +93,13 @@ function DamageRow({ label, dice, average, type, onChange, onRemove }) {
       </div>
       <div style={{ flex: 2 }}>
         {label && <div className="field-label">Average</div>}
-        <input
-          type="number"
+        <NumberInput
           min={0}
-          value={average ?? ''}
+          allowEmpty
+          value={average ?? null}
           placeholder={auto !== null ? `${auto} (auto)` : '—'}
           title="Leave blank to use the dice average"
-          onChange={e => onChange({ average: e.target.value === '' ? null : Math.max(0, parseInt(e.target.value) || 0) })}
+          onChange={val => onChange({ average: val })}
         />
       </div>
       <div style={{ flex: 3 }}>
@@ -155,10 +156,10 @@ function MultiattackCard({ multiattack, attacks, ownerName, onChange }) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             <div style={{ width: 96, flexShrink: 0 }}>
               <div className="field-label" style={{ whiteSpace: 'nowrap' }}># of Attacks</div>
-              <input
-                type="number" min={2} max={10}
+              <NumberInput
+                min={2} max={10}
                 value={ma.count}
-                onChange={e => set('count', Math.max(2, Math.min(10, parseInt(e.target.value) || 2)))}
+                onChange={val => set('count', val)}
               />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -268,10 +269,9 @@ function AttackRow({ attack: a, expanded, onToggle, onUpdate, onRemove, showMult
             </div>
             <div style={{ flex: 1 }}>
               <div className="field-label">Hit Bonus</div>
-              <input
-                type="number"
+              <NumberInput
                 value={a.hitBonus}
-                onChange={e => update({ hitBonus: parseInt(e.target.value) || 0 })}
+                onChange={val => update({ hitBonus: val })}
               />
             </div>
           </div>
@@ -301,10 +301,10 @@ function AttackRow({ attack: a, expanded, onToggle, onUpdate, onRemove, showMult
             {a.melee && (
               <div style={{ flex: 1 }}>
                 <div className="field-label">Reach (ft)</div>
-                <input
-                  type="number" min={0} step={5}
+                <NumberInput
+                  min={0} step={5}
                   value={a.reach ?? 5}
-                  onChange={e => update({ reach: Math.max(0, parseInt(e.target.value) || 0) })}
+                  onChange={val => update({ reach: val })}
                 />
               </div>
             )}

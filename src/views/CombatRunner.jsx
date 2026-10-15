@@ -4,11 +4,12 @@ import MonsterForm from '../components/MonsterForm';
 import SpellcastingBlock from '../components/SpellcastingBlock';
 import AttacksBlock from '../components/AttacksBlock';
 import MonsterTraitsBlock from '../components/MonsterTraitsBlock';
+import AbilityGrid from '../components/AbilityGrid';
 import {
   normalizeMonster, isLimitedSpell, spellFrequencyLabel, spellDefenseLine, SPELL_ACTION_TYPES,
   normalizeAttack, attackDamageParts, attackDamageText, attackKindLabel, attackReachText,
   multiattackText, numberWord, diceAverage, rollDiceExpr, applyDamageDefenses, damageResponse,
-  damageTypeLabel, hasDefenses,
+  damageTypeLabel, hasDefenses, hasOtherSpeeds, speedText,
 } from '../utils/helpers';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -461,6 +462,16 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, onSetSp
             </div>
           </div>
 
+          {/* Other speeds (fly, swim, climb, burrow) */}
+          {c.type === 'monster' && hasOtherSpeeds(c.template) && (
+            <div className="expand-section" style={{ marginTop: 14 }}>
+              <div className="expand-section-title">Speed</div>
+              <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                {speedText({ speed: c.speed, speeds: c.template.speeds })}
+              </div>
+            </div>
+          )}
+
           {/* Initiative — read-only */}
           <div className="expand-section" style={{ marginTop: 14 }}>
             <div className="expand-section-title">Initiative</div>
@@ -480,19 +491,11 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, onSetSp
           {c.abilities && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Ability Scores</div>
-              <div className="ability-grid">
-                {['str','dex','con','int','wis','cha'].map(ab => {
-                  const score = c.abilities?.[ab] ?? 10;
-                  const mod = Math.floor((score - 10) / 2);
-                  return (
-                    <div className="ability-cell" key={ab}>
-                      <span className="ability-name">{ab.toUpperCase()}</span>
-                      <span className="ability-score">{score}</span>
-                      <span className="ability-mod">{mod >= 0 ? `+${mod}` : mod}</span>
-                    </div>
-                  );
-                })}
-              </div>
+              <AbilityGrid
+                abilities={c.abilities}
+                saves={c.template?.saves}
+                showSaves={c.type === 'monster'}
+              />
             </div>
           )}
         </div>
@@ -2299,7 +2302,12 @@ export default function CombatRunner({
                       <span className="combatant-stat-label">AC</span>
                       <span className="combatant-stat-value">{c.ac}</span>
                     </div>
-                    <div className="combatant-stat">
+                    <div
+                      className="combatant-stat"
+                      title={c.type === 'monster' && hasOtherSpeeds(c.template)
+                        ? speedText({ speed: c.speed, speeds: c.template.speeds })
+                        : undefined}
+                    >
                       <span className="combatant-stat-label">Speed</span>
                       <span className="combatant-stat-value">{c.speed}</span>
                       <span className="combatant-stat-sub">ft</span>

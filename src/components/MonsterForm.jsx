@@ -3,6 +3,9 @@ import AbilityScores from './AbilityScores'
 import AttackEditor from './AttackEditor'
 import MonsterSpellEditor from './MonsterSpellEditor'
 import MonsterDefensesEditor from './MonsterDefensesEditor'
+import NumberInput from './NumberInput'
+import SavingThrows from './SavingThrows'
+import OtherSpeedsEditor from './OtherSpeedsEditor'
 import { MONSTER_TYPES, EMPTY_MONSTER, normalizeMonster } from '../utils/helpers'
 
 const TABS = ['Stats', 'Skills & Defenses', 'Attacks', 'Spells', 'Notes']
@@ -13,6 +16,8 @@ export default function MonsterForm({ initial, onSave, onClose }) {
     spells: [],
     attacks: [],
     skills: [],
+    saves: {},
+    speeds: {},
     resistances: [],
     immunities: [],
     conditionImmunities: [],
@@ -140,41 +145,43 @@ export default function MonsterForm({ initial, onSave, onClose }) {
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
               <div className="field-label">Max HP</div>
-              <input
-                type="number"
+              <NumberInput
                 min={1}
                 value={data.hp}
-                onChange={e => set('hp', parseInt(e.target.value) || 1)}
+                onChange={val => set('hp', val)}
               />
             </div>
             <div style={{ flex: 1 }}>
               <div className="field-label">Armor Class</div>
-              <input
-                type="number"
+              <NumberInput
                 min={1}
                 value={data.ac}
-                onChange={e => set('ac', parseInt(e.target.value) || 10)}
+                onChange={val => set('ac', val)}
               />
             </div>
             <div style={{ flex: 1 }}>
               <div className="field-label">Speed (ft)</div>
-              <input
-                type="number"
+              <NumberInput
                 min={0}
                 step={5}
                 value={data.speed ?? 30}
-                onChange={e => set('speed', parseInt(e.target.value) || 30)}
+                onChange={val => set('speed', val)}
               />
             </div>
             <div style={{ flex: 1 }}>
               <div className="field-label">Initiative Mod</div>
-              <input
-                type="number"
+              <NumberInput
                 value={data.initiativeMod ?? 0}
-                onChange={e => set('initiativeMod', parseInt(e.target.value) || 0)}
+                onChange={val => set('initiativeMod', val)}
               />
             </div>
           </div>
+
+          {/* Fly / Swim / Climb / Burrow — hidden until added */}
+          <OtherSpeedsEditor
+            speeds={data.speeds}
+            onChange={val => set('speeds', val)}
+          />
 
           {/* Ability scores */}
           <div>
@@ -182,6 +189,19 @@ export default function MonsterForm({ initial, onSave, onClose }) {
             <AbilityScores
               abilities={data.abilities}
               onChange={val => set('abilities', val)}
+            />
+          </div>
+
+          {/* Saving throws — default to the ability modifier, can be overridden */}
+          <div>
+            <div className="field-label" style={{ marginBottom: 2 }}>Saving Throws</div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+              Defaults to the ability modifier. Type a different bonus for proficient saves.
+            </div>
+            <SavingThrows
+              abilities={data.abilities}
+              saves={data.saves}
+              onChange={val => set('saves', val)}
             />
           </div>
         </div>

@@ -1,3 +1,4 @@
+import NumberInput from './NumberInput'
 import { ABILITY_KEYS, ABILITY_LABELS, abilityMod, modStr } from '../utils/helpers'
 
 export default function AbilityScores({ abilities, onChange, readOnly }) {
@@ -12,12 +13,11 @@ export default function AbilityScores({ abilities, onChange, readOnly }) {
             {readOnly ? (
               <span className="ability-score">{score}</span>
             ) : (
-              <input
-                type="number"
+              <NumberInput
                 min={1}
                 max={30}
                 value={score}
-                onChange={e => onChange({ ...abilities, [key]: parseInt(e.target.value) || 10 })}
+                onChange={val => onChange({ ...abilities, [key]: val })}
                 style={{
                   width: '100%',
                   border: 'none',

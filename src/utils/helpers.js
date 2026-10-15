@@ -36,6 +36,51 @@ export const ABILITY_NAMES = {
 
 export const DEFAULT_ABILITIES = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }
 
+// ─── Saving throws ────────────────────────────────────────────────────────────
+// 2024 stat blocks list a Save bonus next to each ability modifier, and the two
+// can differ (proficient saves). A monster stores only the saves that differ from
+// the plain modifier in `saves`, e.g. { dex: 5, wis: 3 }. Any ability not listed
+// saves with its modifier, so it keeps tracking the score if the score changes.
+
+export function hasSaveOverride(monster, ability) {
+  return Number.isFinite(monster?.saves?.[ability])
+}
+
+export function saveBonus(monster, ability) {
+  return hasSaveOverride(monster, ability)
+    ? monster.saves[ability]
+    : abilityMod(monster?.abilities?.[ability] ?? 10)
+}
+
+// ─── Speeds ───────────────────────────────────────────────────────────────────
+// `speed` is the walking speed. Other movement modes live in `speeds`,
+// e.g. { fly: 60, swim: 30 }; a missing or 0 entry means the monster has none.
+
+export const SPEED_TYPES = [
+  { id: 'fly',    label: 'Fly' },
+  { id: 'swim',   label: 'Swim' },
+  { id: 'climb',  label: 'Climb' },
+  { id: 'burrow', label: 'Burrow' },
+]
+
+export function otherSpeeds(monster) {
+  return SPEED_TYPES
+    .map(t => ({ ...t, value: monster?.speeds?.[t.id] }))
+    .filter(t => Number.isFinite(t.value) && t.value > 0)
+}
+
+export function hasOtherSpeeds(monster) {
+  return otherSpeeds(monster).length > 0
+}
+
+// "30 ft, fly 60 ft, swim 30 ft"
+export function speedText(monster) {
+  return [
+    `${monster?.speed ?? 30} ft`,
+    ...otherSpeeds(monster).map(t => `${t.id} ${t.value} ft`),
+  ].join(', ')
+}
+
 // ─── Monster spellcasting ─────────────────────────────────────────────────────
 // Monster stat blocks don't use spell slots or spell levels. A monster has one
 // Spellcasting entry (ability + save DC + optional attack bonus) and each spell
@@ -235,7 +280,9 @@ export const EMPTY_MONSTER = {
   ac: 12,
   speed: 30,
   initiativeMod: 0,
+  speeds: {},               // extra movement, e.g. { fly: 60, swim: 30 }
   abilities: { ...DEFAULT_ABILITIES },
+  saves: {},                // only saves that differ from the modifier, e.g. { dex: 5 }
   attacks: [],
   multiattack: null,        // null = no Multiattack, otherwise { count, description }
   skills: [],               // [{ skill: 'perception', bonus: 4 }]

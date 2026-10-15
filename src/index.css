@@ -569,6 +569,23 @@ select {
   color: var(--text2);
 }
 
+/* 2024-style saving throw line under each ability in a stat block */
+.ability-save {
+  width: 100%;
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text3);
+}
+
+.ability-save.is-custom {
+  color: var(--green-text);
+  font-weight: 700;
+}
+
 /* ── Attack rows ──────────────────────────────────────────────────────────── */
 .attack-row {
   display: flex;
