@@ -1,14 +1,13 @@
 import { useState } from 'react'
 import AbilityScores from './AbilityScores'
 import AttackEditor from './AttackEditor'
-import SpellEditor from './SpellEditor'
-import SpellSlots from './SpellSlots'
-import { MONSTER_TYPES, EMPTY_MONSTER } from '../utils/helpers'
+import MonsterSpellEditor from './MonsterSpellEditor'
+import { MONSTER_TYPES, EMPTY_MONSTER, normalizeMonster } from '../utils/helpers'
 
 const TABS = ['Stats', 'Attacks', 'Spells', 'Notes']
 
 export default function MonsterForm({ initial, onSave, onClose }) {
-  const [data, setData] = useState(() => ({
+  const [data, setData] = useState(() => normalizeMonster({
     ...EMPTY_MONSTER,
     spells: [],
     attacks: [],
@@ -20,7 +19,10 @@ export default function MonsterForm({ initial, onSave, onClose }) {
 
   function handleSave() {
     if (!data.name.trim()) { alert('Monster needs a name!'); return }
-    onSave({ ...data, maxHp: data.hp })
+    // Monsters don't use spell slots; drop the Spellcasting entry if no spells remain.
+    const { spellSlots, ...rest } = data
+    const spellcasting = (rest.spells?.length ?? 0) > 0 ? rest.spellcasting : null
+    onSave({ ...rest, spellcasting, maxHp: data.hp })
   }
 
   return (
@@ -180,22 +182,12 @@ export default function MonsterForm({ initial, onSave, onClose }) {
 
       {/* Spells tab */}
       {tab === 'Spells' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div>
-            <div className="field-label" style={{ marginBottom: 8 }}>Spell Slots per Level</div>
-            <SpellSlots
-              slots={data.spellSlots ?? {}}
-              onChange={val => set('spellSlots', val)}
-            />
-          </div>
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-            <div className="field-label" style={{ marginBottom: 8 }}>Known Spells</div>
-            <SpellEditor
-              spells={data.spells ?? []}
-              onChange={val => set('spells', val)}
-            />
-          </div>
-        </div>
+        <MonsterSpellEditor
+          spellcasting={data.spellcasting}
+          spells={data.spells ?? []}
+          onChangeSpellcasting={val => set('spellcasting', val)}
+          onChangeSpells={val => set('spells', val)}
+        />
       )}
 
       {/* Notes tab */}
