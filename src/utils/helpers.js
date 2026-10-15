@@ -301,8 +301,17 @@ export const EMPTY_MULTIATTACK = {
 // Average of a dice expression, rounded down the way stat blocks print it.
 // "3d8+3" → 16, "5d6" → 17, "4" → 4, "2d6 + 1d4 - 1" → 8. Returns null when the
 // text isn't a dice expression.
+// Accept dice typed the way stat blocks print them. "6 (1d6 + 3) + 5 (2d4)"
+// → "1d6+3+2d4", "11 (2d10)" → "2d10". Plain expressions pass through as-is.
+export function cleanDice(expr) {
+  const s = String(expr ?? '').trim()
+  if (!s.includes('(')) return s
+  const inner = [...s.matchAll(/\(([^()]*)\)/g)].map(m => m[1].trim()).filter(Boolean)
+  return inner.length ? inner.join(' + ') : s.replace(/[()]/g, '')
+}
+
 export function diceAverage(expr) {
-  const s = String(expr ?? '').replace(/\s+/g, '').toLowerCase()
+  const s = cleanDice(expr).replace(/\s+/g, '').toLowerCase()
   if (!s) return null
   const terms = s.match(/[+-]?[^+-]+/g)
   if (!terms) return null
@@ -327,7 +336,7 @@ export function diceAverage(expr) {
 // Roll a dice expression with any number of terms ("2d6+1d4+3").
 // Returns { total, breakdown } — breakdown like "[4+2]+3".
 export function rollDiceExpr(expr) {
-  const s = String(expr ?? '').replace(/\s+/g, '').toLowerCase()
+  const s = cleanDice(expr).replace(/\s+/g, '').toLowerCase()
   if (!s) return { total: 0, breakdown: '0' }
   const terms = s.match(/[+-]?[^+-]+/g) ?? []
   let total = 0
@@ -409,11 +418,13 @@ export function attackDamageParts(atk) {
   if (!atk) return []
   const parts = []
   if (atk.damage) {
-    parts.push({ dice: atk.damage, type: atk.damageType ?? '', average: partAverage(atk.damage, atk.damageAverage) })
+    const dice = cleanDice(atk.damage)
+    parts.push({ dice, type: atk.damageType ?? '', average: partAverage(dice, atk.damageAverage) })
   }
   for (const p of atk.extraDamage ?? []) {
     if (!p?.dice) continue
-    parts.push({ dice: p.dice, type: p.type ?? '', average: partAverage(p.dice, p.average) })
+    const dice = cleanDice(p.dice)
+    parts.push({ dice, type: p.type ?? '', average: partAverage(dice, p.average) })
   }
   return parts
 }

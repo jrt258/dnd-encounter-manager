@@ -309,7 +309,11 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                     <tr className="table-expand-row" key={`${m.id}-expand`}>
                       <td colSpan={6}>
                         <div className="table-expand-content">
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                          {/* Two independent columns, like a printed stat block: stats on the
+                              left, actions on the right. Each stacks on its own so a long
+                              attack list doesn't leave a gap under the ability scores. */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
                             {m.abilities && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Ability Scores</div>
@@ -334,6 +338,14 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                                 <MonsterTraitsBlock monster={m} />
                               </div>
                             )}
+                            {m.notes && (
+                              <div>
+                                <div className="section-heading" style={{ marginTop: 0 }}>Notes</div>
+                                <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{m.notes}</p>
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
                             {(m.attacks?.length > 0 || m.multiattack) && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Attacks</div>
@@ -346,12 +358,7 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                                 <SpellcastingBlock spellcasting={m.spellcasting} spells={m.spells} />
                               </div>
                             )}
-                            {m.notes && (
-                              <div>
-                                <div className="section-heading" style={{ marginTop: 0 }}>Notes</div>
-                                <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6 }}>{m.notes}</p>
-                              </div>
-                            )}
+                          </div>
                           </div>
                         </div>
                       </td>

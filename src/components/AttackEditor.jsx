@@ -152,16 +152,16 @@ function MultiattackCard({ multiattack, attacks, ownerName, onChange }) {
 
       {enabled && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <div className="field-label">Attacks per Multiattack</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div style={{ width: 96, flexShrink: 0 }}>
+              <div className="field-label" style={{ whiteSpace: 'nowrap' }}># of Attacks</div>
               <input
                 type="number" min={2} max={10}
                 value={ma.count}
                 onChange={e => set('count', Math.max(2, Math.min(10, parseInt(e.target.value) || 2)))}
               />
             </div>
-            <div style={{ flex: 3 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div className="field-label">Description (optional)</div>
               <input
                 type="text"
