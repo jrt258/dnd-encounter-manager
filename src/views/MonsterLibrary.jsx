@@ -4,7 +4,8 @@ import Modal from '../components/Modal';
 import SpellcastingBlock from '../components/SpellcastingBlock';
 import AttacksBlock from '../components/AttacksBlock';
 import MonsterTraitsBlock from '../components/MonsterTraitsBlock';
-import { uid, hasDefenses } from '../utils/helpers';
+import AbilityGrid from '../components/AbilityGrid';
+import { uid, hasDefenses, speedText } from '../utils/helpers';
 
 const CR_BRACKETS = [
   { label: 'All CR', value: 'all' },
@@ -314,22 +315,14 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                               attack list doesn't leave a gap under the ability scores. */}
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6 }}>
+                              <span style={{ fontWeight: 700, color: 'var(--text)' }}>Speed </span>
+                              {speedText(m)}
+                            </div>
                             {m.abilities && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Ability Scores</div>
-                                <div className="ability-grid">
-                                  {['str','dex','con','int','wis','cha'].map(ab => {
-                                    const score = m.abilities?.[ab] ?? 10;
-                                    const mod   = Math.floor((score - 10) / 2);
-                                    return (
-                                      <div className="ability-cell" key={ab}>
-                                        <span className="ability-name">{ab.toUpperCase()}</span>
-                                        <span className="ability-score">{score}</span>
-                                        <span className="ability-mod">{mod >= 0 ? `+${mod}` : mod}</span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
+                                <AbilityGrid abilities={m.abilities} saves={m.saves} showSaves />
                               </div>
                             )}
                             {hasDefenses(m) && (

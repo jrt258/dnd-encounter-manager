@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import NumberInput from './NumberInput'
 import {
   uid, EMPTY_MONSTER_SPELL, EMPTY_SPELLCASTING, SPELLCASTING_ABILITIES, SPELL_ACTION_TYPES,
   ABILITY_KEYS, ABILITY_LABELS, ABILITY_NAMES, modStr, spellAttackBonus,
@@ -77,20 +78,20 @@ function SpellcastingCard({ spellcasting, onChange }) {
         </div>
         <div style={{ flex: 1 }}>
           <div className="field-label">Spell Save DC</div>
-          <input
-            type="number" min={1} max={30}
+          <NumberInput
+            min={1} max={30}
             value={sc.saveDC}
-            onChange={e => set('saveDC', parseInt(e.target.value) || 10)}
+            onChange={val => set('saveDC', val)}
           />
         </div>
         <div style={{ flex: 1 }}>
           <div className="field-label">Spell Attack</div>
-          <input
-            type="number"
-            value={sc.attackBonus ?? ''}
+          <NumberInput
+            allowEmpty
+            value={sc.attackBonus ?? null}
             placeholder={modStr(autoBonus)}
             title="Leave blank to use save DC − 8"
-            onChange={e => set('attackBonus', e.target.value === '' ? null : parseInt(e.target.value))}
+            onChange={val => set('attackBonus', val)}
           />
         </div>
       </div>
@@ -193,10 +194,10 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
             {spell.frequency === 'perDay' && (
               <div style={{ flex: 1 }}>
                 <div className="field-label">Uses / Day</div>
-                <input
-                  type="number" min={1} max={9}
+                <NumberInput
+                  min={1} max={9}
                   value={spell.usesPerDay}
-                  onChange={e => update('usesPerDay', Math.max(1, Math.min(9, parseInt(e.target.value) || 1)))}
+                  onChange={val => update('usesPerDay', val)}
                 />
               </div>
             )}

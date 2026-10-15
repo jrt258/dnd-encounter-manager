@@ -1,3 +1,4 @@
+import NumberInput from './NumberInput'
 import {
   SKILLS, ABILITY_LABELS, DAMAGE_TYPES, CONDITIONS,
   skillDef, defaultSkillBonus, proficiencyBonusForCR, abilityMod, modStr, sortedSkills,
@@ -117,10 +118,9 @@ export default function MonsterDefensesEditor({ data, onChange }) {
                 </select>
               </div>
               <div style={{ flex: 1 }}>
-                <input
-                  type="number"
+                <NumberInput
                   value={s.bonus}
-                  onChange={e => updateSkill(i, { bonus: parseInt(e.target.value) || 0 })}
+                  onChange={val => updateSkill(i, { bonus: val })}
                 />
               </div>
               <div style={{ flex: 2, fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace' }}>
