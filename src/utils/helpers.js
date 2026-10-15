@@ -273,6 +273,7 @@ function migrateMonsterSpells(monster) {
 
 export const EMPTY_MONSTER = {
   name: '',
+  size: 'Medium',
   type: 'Beast',
   cr: '1',
   hp: 10,
@@ -670,6 +671,8 @@ export const EMPTY_SPELL = {
   ritual: false,
   description: '',
 }
+
+export const MONSTER_SIZES = ['Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan']
 
 export const MONSTER_TYPES = [
   'Aberration','Beast','Celestial','Construct','Dragon','Elemental',

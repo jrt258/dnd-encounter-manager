@@ -6,7 +6,7 @@ import MonsterDefensesEditor from './MonsterDefensesEditor'
 import NumberInput from './NumberInput'
 import SavingThrows from './SavingThrows'
 import OtherSpeedsEditor from './OtherSpeedsEditor'
-import { MONSTER_TYPES, EMPTY_MONSTER, normalizeMonster } from '../utils/helpers'
+import { MONSTER_SIZES, MONSTER_TYPES, EMPTY_MONSTER, normalizeMonster } from '../utils/helpers'
 
 const TABS = ['Stats', 'Skills & Defenses', 'Attacks', 'Spells', 'Notes']
 
@@ -22,6 +22,9 @@ export default function MonsterForm({ initial, onSave, onClose }) {
     immunities: [],
     conditionImmunities: [],
     ...(initial ?? {}),
+    // New monsters start as Medium; an existing monster with no size stays unset
+    // instead of silently becoming Medium when it's edited.
+    size: initial ? (initial.size ?? '') : EMPTY_MONSTER.size,
   }))
   const [tab, setTab] = useState('Stats')
 
@@ -89,7 +92,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
       {tab === 'Stats' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-          {/* Name + Type + CR */}
+          {/* Name + Size + Type + CR */}
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 3 }}>
               <div className="field-label">Monster Name *</div>
@@ -99,6 +102,13 @@ export default function MonsterForm({ initial, onSave, onClose }) {
                 placeholder="e.g. Goblin Shaman"
                 onChange={e => set('name', e.target.value)}
               />
+            </div>
+            <div style={{ flex: 1.5 }}>
+              <div className="field-label">Size</div>
+              <select value={data.size ?? ''} onChange={e => set('size', e.target.value)}>
+                {!data.size && <option value="">— Select —</option>}
+                {MONSTER_SIZES.map(s => <option key={s}>{s}</option>)}
+              </select>
             </div>
             <div style={{ flex: 2 }}>
               <div className="field-label">Type</div>

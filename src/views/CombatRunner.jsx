@@ -688,7 +688,7 @@ function AddMonsterModal({ monsters, onAdd, onClose }) {
                         )}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>
-                        {[m.type, m.cr !== undefined && `CR ${m.cr}`, m.hp && `${m.hp} HP`].filter(Boolean).join(' · ')}
+                        {[[m.size, m.type].filter(Boolean).join(' '), m.cr !== undefined && `CR ${m.cr}`, m.hp && `${m.hp} HP`].filter(Boolean).join(' · ')}
                       </div>
                     </div>
                     {isSelected && (
