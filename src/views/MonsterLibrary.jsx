@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import MonsterForm from '../components/MonsterForm';
 import Modal from '../components/Modal';
+import SpellcastingBlock from '../components/SpellcastingBlock';
 import { uid } from '../utils/helpers';
 
 const CR_BRACKETS = [
@@ -333,6 +334,12 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                                     </div>
                                   ))}
                                 </div>
+                              </div>
+                            )}
+                            {m.spells?.length > 0 && (
+                              <div>
+                                <div className="section-heading" style={{ marginTop: 0 }}>Spellcasting</div>
+                                <SpellcastingBlock spellcasting={m.spellcasting} spells={m.spells} />
                               </div>
                             )}
                             {m.notes && (

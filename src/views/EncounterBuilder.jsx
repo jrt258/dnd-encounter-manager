@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react';
 import Modal from '../components/Modal';
 import MonsterForm from '../components/MonsterForm';
 import PlayerForm from '../components/PlayerForm';
+import SpellcastingBlock from '../components/SpellcastingBlock';
+import { normalizeMonster } from '../utils/helpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -107,7 +109,7 @@ function FilterPill({ label, active, onClick }) {
 // ─── Monster Card Modal ───────────────────────────────────────────────────────
 
 function MonsterCard({ monster, onClose, onAdd, onEdit }) {
-  const m = monster;
+  const m = normalizeMonster(monster);
   const ABILITY_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
 
   return (
@@ -180,51 +182,10 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
         </div>
       )}
 
-      {m.spellSlots && Object.values(m.spellSlots).some(v => v > 0) && (
-        <div style={{ marginBottom: 20 }}>
-          <div className="section-heading" style={{ marginTop: 0 }}>Spell Slots</div>
-          <div className="spell-slots-grid">
-            {Object.entries(m.spellSlots).map(([lvl, count]) =>
-              count > 0 ? (
-                <div className="slot-level" key={lvl}>
-                  <span className="slot-level-label">Lvl {lvl}</span>
-                  <div className="slot-pips">
-                    {Array.from({ length: count }).map((_, i) => <div className="slot-pip" key={i} />)}
-                  </div>
-                </div>
-              ) : null
-            )}
-          </div>
-        </div>
-      )}
-
       {m.spells?.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div className="section-heading" style={{ marginTop: 0 }}>Spells</div>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-            {[...m.spells].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)).map((sp, i) => {
-              let defLine = '';
-              if (sp.defenseType === 'save') defLine = `${sp.saveAbility?.toUpperCase()} Save DC ${sp.saveDC}${sp.onSave ? ` · ${sp.onSave} on save` : ''}`;
-              else if (sp.defenseType === 'attack') defLine = `${modStr(sp.attackBonus)} spell attack`;
-              return (
-                <div key={sp.id ?? i} style={{ padding: '10px 14px', borderBottom: i < m.spells.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name}</span>
-                    <span className="tag tag-purple" style={{ fontSize: 9 }}>{sp.level === 0 ? 'Cantrip' : `Lvl ${sp.level}`}</span>
-                    {sp.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
-                    {sp.ritual && <span className="tag tag-blue" style={{ fontSize: 9 }}>ℛ Ritual</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', display: 'flex', flexWrap: 'wrap', gap: '0 10px', marginBottom: sp.description ? 4 : 0 }}>
-                    {sp.castingTime && <span>{sp.castingTime}</span>}
-                    {sp.range && <span>{sp.range}</span>}
-                    {sp.effect && <span>{sp.effect}</span>}
-                    {defLine && <span style={{ color: 'var(--accent-text)' }}>{defLine}</span>}
-                  </div>
-                  {sp.description && <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{sp.description}</div>}
-                </div>
-              );
-            })}
-          </div>
+          <div className="section-heading" style={{ marginTop: 0 }}>Spellcasting</div>
+          <SpellcastingBlock spellcasting={m.spellcasting} spells={m.spells} />
         </div>
       )}
 

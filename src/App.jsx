@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import MonsterLibrary from './views/MonsterLibrary';
 import PlayerRoster from './views/PlayerRoster';
 import EncounterBuilder from './views/EncounterBuilder';
 import CombatRunner from './views/CombatRunner';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { DEFAULT_MONSTERS } from './defaultMonsters';
+import { normalizeMonster, monsterNeedsMigration } from './utils/helpers';
 
 const NAV_ITEMS = [
   {
@@ -66,7 +67,7 @@ export default function App() {
   const monsters = useMemo(() => {
     const userIds = new Set(userMonsters.map(m => m.id));
     const freshDefaults = DEFAULT_MONSTERS.filter(d => !userIds.has(d.id));
-    return [...freshDefaults, ...userMonsters];
+    return [...freshDefaults, ...userMonsters].map(normalizeMonster);
   }, [userMonsters]);
   const setMonsters = setUserMonsters;
 
@@ -76,6 +77,28 @@ export default function App() {
   // Encounters
   const [encounters, setEncounters]               = useLocalStorage('dnd_encounters', []);
   const [activeEncounterId, setActiveEncounterId] = useLocalStorage('dnd_active_encounter', null);
+
+  // One-time migration: monsters saved with the old spell format (spell levels
+  // + spell slots) are converted to At Will / X/Day spells with a single
+  // Spellcasting entry, in the library and in saved encounter snapshots.
+  useEffect(() => {
+    if (userMonsters.some(monsterNeedsMigration)) {
+      setUserMonsters(userMonsters.map(normalizeMonster));
+    }
+  }, [userMonsters]);
+
+  useEffect(() => {
+    const stale = encounters.some(enc =>
+      (enc.entries ?? []).some(e => e.type === 'monster' && monsterNeedsMigration(e.monster))
+    );
+    if (!stale) return;
+    setEncounters(encounters.map(enc => ({
+      ...enc,
+      entries: (enc.entries ?? []).map(e =>
+        e.type === 'monster' ? { ...e, monster: normalizeMonster(e.monster) } : e
+      ),
+    })));
+  }, [encounters]);
 
   // Lifted editing state for page header buttons
   const [monsterEditing, setMonsterEditing] = useState(null);

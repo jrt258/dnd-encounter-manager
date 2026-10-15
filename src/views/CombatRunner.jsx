@@ -1,6 +1,10 @@
 import { useState, useRef, useCallback } from 'react';
 import Modal from '../components/Modal';
 import MonsterForm from '../components/MonsterForm';
+import SpellcastingBlock from '../components/SpellcastingBlock';
+import {
+  normalizeMonster, isLimitedSpell, spellFrequencyLabel, spellDefenseLine, SPELL_ACTION_TYPES,
+} from '../utils/helpers';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -137,7 +141,7 @@ function buildCombatants(entries) {
         expanded: false,
       });
     } else if (entry.type === 'monster') {
-      const m = entry.monster;
+      const m = normalizeMonster(entry.monster);
       const count = entry.count || 1;
       const groupInitMod = dexMod(m.abilities) + (m.initiativeMod ?? 0);
       for (let i = 0; i < count; i++) {
@@ -158,8 +162,10 @@ function buildCombatants(entries) {
           initiative: null,
           initMod: groupInitMod,
           conditions: [],
-          spellSlots: m.spellSlots ? JSON.parse(JSON.stringify(m.spellSlots)) : null,
+          spellSlots: null,        // monsters don't use slots
           usedSlots: {},
+          spellcasting: m.spellcasting ?? null,
+          usedSpells: {},          // { [spellId]: uses spent } for X/Day spells
           attacks: m.attacks ?? [],
           spells: m.spells ?? [],
           notes: m.notes ?? '',
@@ -182,15 +188,21 @@ function monsterInitMod(m) {
   return dexMod(m?.abilities) + (m?.initiativeMod ?? 0);
 }
 
-// Clamp expended spell slots so none exceed the (possibly new) totals.
-function clampUsedSlots(usedSlots, spellSlots) {
+// Clamp spent X/Day uses to the (possibly new) per-day limits. Uses for
+// spells that were removed, or are now At Will, are dropped.
+function clampUsedSpells(usedSpells, spells) {
   const next = {};
-  if (!spellSlots) return next;
-  for (const [lvl, total] of Object.entries(spellSlots)) {
-    const used = usedSlots?.[lvl] ?? 0;
-    if (total > 0 && used > 0) next[lvl] = Math.min(used, total);
+  for (const sp of spells ?? []) {
+    const used = usedSpells?.[sp.id] ?? 0;
+    if (isLimitedSpell(sp) && used > 0) next[sp.id] = Math.min(used, sp.usesPerDay);
   }
   return next;
+}
+
+// Pull a dice expression like "8d6" or "2d10+4" out of free text.
+function diceFromText(text) {
+  const m = (text ?? '').match(/\d*d\d+(\s*[+-]\s*\d+)?/i);
+  return m ? m[0].replace(/\s+/g, '') : '';
 }
 
 // Re-number an instance name when its base (library) name changes,
@@ -204,9 +216,10 @@ function renameFromBase(currentName, oldBase, newBase) {
 
 // Field-merge a library template onto a live combatant.
 // Template-level stats are overwritten; transient combat state is preserved:
-// damage, tempHp, conditions, initiative, expanded, and (clamped) usedSlots.
-function applyTemplateToCombatant(c, tmpl) {
-  const spellSlots = tmpl.spellSlots ? JSON.parse(JSON.stringify(tmpl.spellSlots)) : null;
+// damage, tempHp, conditions, initiative, expanded, and (clamped) spell uses.
+function applyTemplateToCombatant(c, rawTmpl) {
+  const tmpl = normalizeMonster(rawTmpl);
+  const spells = tmpl.spells ?? [];
   const maxHp = tmpl.hp ?? c.maxHp;
   return {
     ...c,
@@ -218,10 +231,12 @@ function applyTemplateToCombatant(c, tmpl) {
     ac: tmpl.ac ?? 10,
     speed: tmpl.speed ?? 30,
     initMod: monsterInitMod(tmpl),
-    spellSlots,
-    usedSlots: clampUsedSlots(c.usedSlots, spellSlots),
+    spellSlots: null,
+    usedSlots: {},
+    spellcasting: tmpl.spellcasting ?? null,
+    usedSpells: clampUsedSpells(c.usedSpells, spells),
     attacks: tmpl.attacks ?? [],
-    spells: tmpl.spells ?? [],
+    spells,
     notes: tmpl.notes ?? '',
     abilities: tmpl.abilities ?? null,
     cr: tmpl.cr,
@@ -246,7 +261,7 @@ function combatantToMonster(c) {
     abilities: c.abilities ?? base.abilities ?? null,
     attacks: c.attacks ?? [],
     spells: c.spells ?? [],
-    spellSlots: c.spellSlots ?? {},
+    spellcasting: c.spellcasting ?? base.spellcasting ?? null,
     notes: c.notes ?? '',
     cr: c.cr ?? base.cr,
   };
@@ -392,7 +407,7 @@ function AttackRowExpand({ atk, isLast }) {
 
 // ─── Expanded detail panel ────────────────────────────────────────────────────
 
-function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
+function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, onSetSpellUses }) {
   const currentHp = c.maxHp - c.damage;
   return (
     <div className="combatant-expand">
@@ -512,7 +527,19 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition }) {
             </div>
           )}
 
-          {c.spells?.length > 0 && (
+          {c.type === 'monster' && c.spells?.length > 0 && (
+            <div className="expand-section" style={{ marginTop: 14 }}>
+              <div className="expand-section-title">Spellcasting</div>
+              <SpellcastingBlock
+                spellcasting={c.spellcasting}
+                spells={c.spells}
+                usedSpells={c.usedSpells ?? {}}
+                onSetUses={(spellId, used) => onSetSpellUses(c.id, spellId, used)}
+              />
+            </div>
+          )}
+
+          {c.type !== 'monster' && c.spells?.length > 0 && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Spells</div>
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
@@ -703,7 +730,7 @@ function AddMonsterModal({ monsters, onAdd, onClose }) {
 
 // ─── Action Modal — 3-step attack/heal flow ───────────────────────────────────
 
-function ActionModal({ attacker, combatants, onApply, onClose }) {
+function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
   const [step, setStep]           = useState('action');
   const [selectedAction, setSelectedAction] = useState(null);
   const [selectedTarget, setSelectedTarget] = useState(null);
@@ -716,8 +743,29 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
   const [conditionTurns, setConditionTurns] = useState('');
 
   const attacks = attacker.attacks ?? [];
-  const spells  = (attacker.spells ?? []).filter(s => s.effect || s.damage);
+  const isMonster = attacker.type === 'monster';
+  // Players keep the old list (spells with an effect); monsters list every spell.
+  const spells  = isMonster
+    ? (attacker.spells ?? [])
+    : (attacker.spells ?? []).filter(s => s.effect || s.damage);
   const hasActions = attacks.length > 0 || spells.length > 0;
+  const isMonsterSpell = selectedAction?.actionType === 'spell' && !!selectedAction?.monsterSpell;
+
+  function usesLeft(sp) {
+    if (!isLimitedSpell(sp)) return null;
+    return Math.max(0, sp.usesPerDay - (attacker.usedSpells?.[sp.id] ?? 0));
+  }
+
+  function pickMonsterSpell(sp) {
+    setSelectedAction({ ...sp, actionType: 'spell', monsterSpell: true, damage: diceFromText(sp.effect) });
+    setStep('target');
+  }
+
+  // Cast a spell that has no target (Misty Step, Shield…): spend the use and close.
+  function castWithoutTarget() {
+    if (isMonsterSpell) onSpendSpell(attacker.id, selectedAction.id, null);
+    onClose();
+  }
 
   const targets  = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0);
   const players  = targets.filter(c => sideOf(c) === 'player');
@@ -754,6 +802,7 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
     const tmpHp  = parseInt(tempHpVal) || 0;
     const turns  = conditionId ? (conditionTurns !== '' ? parseInt(conditionTurns) : null) : undefined;
     if (!selectedTarget) return;
+    if (isMonsterSpell) onSpendSpell(attacker.id, selectedAction.id, selectedTarget.name);
     onApply(selectedTarget.id, dmg, heal, tmpHp, selectedAction, attacker, conditionId || null, turns ?? null);
     onClose();
   }
@@ -850,7 +899,65 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
                 </>
               )}
 
-              {spells.length > 0 && (
+              {isMonster && spells.length > 0 && SPELL_ACTION_TYPES.map((type, ti) => {
+                const list = spells
+                  .filter(sp => (sp.actionType ?? 'action') === type.id)
+                  .sort((a, b) =>
+                    (isLimitedSpell(a) ? 1 : 0) - (isLimitedSpell(b) ? 1 : 0) ||
+                    (b.usesPerDay ?? 0) - (a.usesPerDay ?? 0) ||
+                    (a.name ?? '').localeCompare(b.name ?? ''));
+                if (list.length === 0) return null;
+                return (
+                  <div key={type.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div className="section-heading" style={{ marginTop: (attacks.length > 0 || ti > 0) ? 8 : 0 }}>
+                      Spells — {type.label}
+                    </div>
+                    {list.map(sp => {
+                      const left = usesLeft(sp);
+                      const exhausted = left === 0;
+                      const defense = spellDefenseLine(sp, attacker.spellcasting);
+                      return (
+                        <button key={sp.id} disabled={exhausted}
+                          onClick={() => !exhausted && pickMonsterSpell(sp)}
+                          title={exhausted ? 'No uses left today — restore a pip in the expanded panel to cast again' : ''}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                            border: '1px solid var(--border)', background: 'var(--surface)',
+                            cursor: exhausted ? 'not-allowed' : 'pointer', textAlign: 'left', width: '100%',
+                            transition: 'background 0.1s', opacity: exhausted ? 0.5 : 1,
+                          }}
+                          onMouseEnter={e => { if (!exhausted) e.currentTarget.style.background = 'var(--surface2)'; }}
+                          onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name || 'Unnamed Spell'}</span>
+                              <span className="tag tag-purple" style={{ fontSize: 9 }}>{spellFrequencyLabel(sp)}</span>
+                              {sp.castLevel ? <span className="tag tag-gray" style={{ fontSize: 9 }}>Lvl {sp.castLevel}</span> : null}
+                              {sp.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+                              {[sp.effect, defense].filter(Boolean).join(' · ') || '—'}
+                            </div>
+                          </div>
+                          {left !== null && (
+                            <span style={{ fontSize: 11, fontFamily: 'DM Mono, monospace', flexShrink: 0,
+                              color: exhausted ? 'var(--accent)' : 'var(--purple-text)' }}>
+                              {exhausted ? 'none left' : `${left}/${sp.usesPerDay} left`}
+                            </span>
+                          )}
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+                            <polyline points="9 18 15 12 9 6" />
+                          </svg>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              {!isMonster && spells.length > 0 && (
                 <>
                   <div className="section-heading" style={{ marginTop: attacks.length > 0 ? 8 : 0 }}>
                     {hasActions ? 'Other' : 'Actions'}
@@ -930,6 +1037,24 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
           {step === 'target' && (
             <div>
               <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12 }} onClick={() => setStep('action')}>← Back</button>
+              {isMonsterSpell && (
+                <button
+                  onClick={castWithoutTarget}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+                    padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+                    border: '1px dashed var(--purple)', background: 'var(--purple-bg)',
+                    cursor: 'pointer', textAlign: 'left', width: '100%',
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--purple-text)' }}>Cast without a target</div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>
+                      Self, area or utility spell{isLimitedSpell(selectedAction) ? ' — uses 1 of today\'s casts' : ''}
+                    </div>
+                  </div>
+                </button>
+              )}
               {targets.length === 0 ? (
                 <div className="empty-state" style={{ padding: 24 }}>No valid targets — all other combatants are down.</div>
               ) : (
@@ -1063,9 +1188,9 @@ function ActionModal({ attacker, combatants, onApply, onClose }) {
               <button
                 className="btn btn-accent btn-full"
                 onClick={handleApply}
-                disabled={!damageVal && !healVal && !tempHpVal && !conditionId}
+                disabled={!isMonsterSpell && !damageVal && !healVal && !tempHpVal && !conditionId}
               >
-                Apply
+                {isMonsterSpell ? 'Cast & Apply' : 'Apply'}
               </button>
             </div>
           )}
@@ -1561,6 +1686,42 @@ export default function CombatRunner({
     }));
   }
 
+  // Set how many uses of an X/Day spell a monster has spent (pip clicks).
+  function setSpellUses(id, spellId, newUsed) {
+    const c  = combatants.find(x => x.id === id);
+    const sp = c?.spells?.find(x => x.id === spellId);
+    if (!c || !sp || !isLimitedSpell(sp)) return;
+    const used = c.usedSpells?.[spellId] ?? 0;
+    const next = Math.max(0, Math.min(sp.usesPerDay, newUsed));
+    if (next === used) return;
+    setCombatants(prev => prev.map(x =>
+      x.id === id ? { ...x, usedSpells: { ...(x.usedSpells ?? {}), [spellId]: next } } : x
+    ));
+    const left = sp.usesPerDay - next;
+    addLog(next > used
+      ? `${c.name} used ${sp.name} (${left}/${sp.usesPerDay} left)`
+      : `${c.name} regained a use of ${sp.name} (${left}/${sp.usesPerDay} left)`, round);
+  }
+
+  // Casting from the action picker: spend one use of an X/Day spell and log it.
+  function spendSpell(id, spellId, targetName) {
+    const c  = combatants.find(x => x.id === id);
+    const sp = c?.spells?.find(x => x.id === spellId);
+    if (!c || !sp) return;
+    const arrow = targetName ? ` → ${targetName}` : '';
+    if (!isLimitedSpell(sp)) {
+      // At Will: nothing to spend. Log a targetless cast; damage is logged on apply.
+      if (!targetName) addLog(`${c.name} casts ${sp.name}`, round);
+      return;
+    }
+    const used = c.usedSpells?.[spellId] ?? 0;
+    const next = Math.min(sp.usesPerDay, used + 1);
+    setCombatants(prev => prev.map(x =>
+      x.id === id ? { ...x, usedSpells: { ...(x.usedSpells ?? {}), [spellId]: next } } : x
+    ));
+    addLog(`${c.name} casts ${sp.name}${arrow} (${sp.usesPerDay - next}/${sp.usesPerDay} left)`, round);
+  }
+
   function toggleExpanded(id) {
     setCombatants(prev => prev.map(c => c.id === id ? { ...c, expanded: !c.expanded } : c));
   }
@@ -1654,7 +1815,8 @@ export default function CombatRunner({
 
   // ── Add Monster During Combat ──────────────────────────────────────────────
 
-  function addMonsterToCombat(monsterTemplate, initiative) {
+  function addMonsterToCombat(rawTemplate, initiative) {
+    const monsterTemplate = normalizeMonster(rawTemplate);
     const maxHp = monsterTemplate.hp ?? 10;
 
     // Number the new monster if one with the same base name already exists
@@ -1681,10 +1843,10 @@ export default function CombatRunner({
       initiative,
       initMod: dexMod(monsterTemplate.abilities),
       conditions: [],
-      spellSlots: monsterTemplate.spellSlots
-        ? JSON.parse(JSON.stringify(monsterTemplate.spellSlots))
-        : null,
+      spellSlots: null,
       usedSlots: {},
+      spellcasting: monsterTemplate.spellcasting ?? null,
+      usedSpells: {},
       attacks: monsterTemplate.attacks ?? [],
       spells: monsterTemplate.spells ?? [],
       notes: monsterTemplate.notes ?? '',
@@ -1810,6 +1972,7 @@ export default function CombatRunner({
           attacker={actionModal}
           combatants={combatants}
           onApply={onApplyAction}
+          onSpendSpell={spendSpell}
           onClose={() => setActionModal(null)}
         />
       )}
@@ -2020,7 +2183,8 @@ export default function CombatRunner({
 
                 {c.expanded && (
                   <CombatantExpand c={c} onUpdate={updateCombatant}
-                    onToggleSlot={toggleSlot} onToggleCondition={toggleCondition} />
+                    onToggleSlot={toggleSlot} onToggleCondition={toggleCondition}
+                    onSetSpellUses={setSpellUses} />
                 )}
               </div>
             );
