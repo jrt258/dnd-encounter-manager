@@ -2,8 +2,13 @@ import { useState, useRef, useCallback } from 'react';
 import Modal from '../components/Modal';
 import MonsterForm from '../components/MonsterForm';
 import SpellcastingBlock from '../components/SpellcastingBlock';
+import AttacksBlock from '../components/AttacksBlock';
+import MonsterTraitsBlock from '../components/MonsterTraitsBlock';
 import {
   normalizeMonster, isLimitedSpell, spellFrequencyLabel, spellDefenseLine, SPELL_ACTION_TYPES,
+  normalizeAttack, attackDamageParts, attackDamageText, attackKindLabel, attackReachText,
+  multiattackText, numberWord, diceAverage, rollDiceExpr, applyDamageDefenses, damageResponse,
+  damageTypeLabel, hasDefenses,
 } from '../utils/helpers';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -498,14 +503,21 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, onSetSp
             <ConditionToggleGrid active={c.conditions} onToggle={(condId, turns) => onToggleCondition(c.id, condId, turns)} />
           </div>
 
-          {c.attacks?.length > 0 && (
+          {c.type === 'monster' && hasDefenses(c.template) && (
+            <div className="expand-section" style={{ marginTop: 14 }}>
+              <div className="expand-section-title">Skills &amp; Defenses</div>
+              <MonsterTraitsBlock monster={c.template} />
+            </div>
+          )}
+
+          {(c.attacks?.length > 0 || (c.type === 'monster' && c.template?.multiattack)) && (
             <div className="expand-section" style={{ marginTop: 14 }}>
               <div className="expand-section-title">Attacks</div>
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                {c.attacks.map((atk, i) => (
-                  <AttackRowExpand key={i} atk={atk} isLast={i === c.attacks.length - 1} />
-                ))}
-              </div>
+              <AttacksBlock
+                attacks={c.attacks ?? []}
+                multiattack={c.type === 'monster' ? (c.template?.multiattack ?? null) : null}
+                ownerName={c.baseName ?? c.name}
+              />
             </div>
           )}
 
@@ -730,7 +742,45 @@ function AddMonsterModal({ monsters, onAdd, onClose }) {
 
 // ─── Action Modal — 3-step attack/heal flow ───────────────────────────────────
 
-function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
+// One attack in the action picker. Orange left edge + tag = Multiattack option.
+function AttackPickButton({ atk, multi, onPick }) {
+  const a = normalizeAttack(atk);
+  const line = [
+    `${a.hitBonus >= 0 ? '+' : ''}${a.hitBonus ?? 0} to hit`,
+    attackReachText(a),
+    attackDamageText(a),
+  ].filter(Boolean).join(' · ');
+  return (
+    <button onClick={onPick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+        border: '1px solid var(--border)', background: 'var(--surface)',
+        borderLeft: multi ? '3px solid var(--orange)' : '1px solid var(--border)',
+        cursor: 'pointer', textAlign: 'left', width: '100%',
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{a.name || 'Unnamed Attack'}</span>
+          <span className="tag tag-blue" style={{ fontSize: 9 }}>{attackKindLabel(a)}</span>
+          {multi && <span className="tag tag-orange" style={{ fontSize: 9 }}>Multiattack</span>}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+          {line}
+        </div>
+      </div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
+  );
+}
+
+function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClose }) {
   const [step, setStep]           = useState('action');
   const [selectedAction, setSelectedAction] = useState(null);
   const [selectedTarget, setSelectedTarget] = useState(null);
@@ -738,12 +788,33 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
   const [healVal, setHealVal]     = useState('');
   const [tempHpVal, setTempHpVal] = useState('');
   const [rolledBreakdown, setRolledBreakdown] = useState('');
+  const [defenseLines, setDefenseLines] = useState([]); // [{ type, raw, final, response }]
   // Condition flow
   const [conditionId, setConditionId] = useState('');
   const [conditionTurns, setConditionTurns] = useState('');
+  // Multiattack: how many of this turn's Multiattack attacks have been resolved
+  const [maMade, setMaMade] = useState(0);
 
-  const attacks = attacker.attacks ?? [];
+  const attacks = (attacker.attacks ?? []).map(normalizeAttack);
   const isMonster = attacker.type === 'monster';
+  const multiattack = isMonster ? (attacker.template?.multiattack ?? null) : null;
+  const maCount = multiattack?.count ?? 0;
+  const maOptions = multiattack ? attacks.filter(a => a.multiattack) : [];
+  const otherAttacks = multiattack ? attacks.filter(a => !a.multiattack) : attacks;
+  const inMultiattack = !!multiattack && selectedAction?.actionType === 'attack' && !!selectedAction?.multiattack;
+
+  // Damage components of the chosen action. Attacks can carry several damage
+  // types; spells and custom actions have a single untyped expression.
+  const damageParts = selectedAction?.actionType === 'attack'
+    ? attackDamageParts(selectedAction)
+    : (selectedAction?.damage
+        ? [{ dice: selectedAction.damage, type: '', average: diceAverage(selectedAction.damage) }]
+        : []);
+  const targetDefenses = selectedTarget?.template ?? null;
+  const notedDefenses = damageParts
+    .map(p => ({ type: p.type, response: damageResponse(targetDefenses, p.type) }))
+    .filter((d, i, arr) => d.response !== 'normal' && arr.findIndex(x => x.type === d.type) === i);
+  const conditionImmune = new Set(targetDefenses?.conditionImmunities ?? []);
   // Players keep the old list (spells with an effect); monsters list every spell.
   const spells  = isMonster
     ? (attacker.spells ?? [])
@@ -772,28 +843,44 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
   const allies   = targets.filter(c => sideOf(c) === 'ally');
   const enemies  = targets.filter(c => sideOf(c) === 'enemy');
 
-  function rollDamageExpr(expr) {
-    if (!expr) return { total: 0, breakdown: '0' };
-    const match = expr.trim().match(/^(\d*)d(\d+)([+-]\d+)?/i);
-    if (!match) {
-      const flat = parseInt(expr) || 0;
-      return { total: flat, breakdown: String(flat) };
-    }
-    const count  = parseInt(match[1] || '1');
-    const sides  = parseInt(match[2]);
-    const mod    = parseInt(match[3] || '0');
-    const rolls  = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
-    const total  = rolls.reduce((a, b) => a + b, 0) + mod;
-    const rollStr = count > 1 ? `[${rolls.join('+')}]` : String(rolls[0]);
-    const breakdown = mod !== 0 ? `${rollStr}${mod > 0 ? '+' : ''}${mod}` : rollStr;
-    return { total: Math.max(0, total), breakdown };
+  // Total the rolled (or average) amount of each damage part, then apply the
+  // target's resistances and immunities type by type.
+  function setDamageFrom(rolled) {
+    const { total, lines } = applyDamageDefenses(rolled, targetDefenses);
+    setDamageVal(String(total));
+    setRolledBreakdown(rolled.map(r => `${r.breakdown}${r.type ? ` ${r.type}` : ''}`).join(' + '));
+    setDefenseLines(lines.filter(l => l.response !== 'normal'));
   }
 
   function handleRoll() {
-    const expr = selectedAction?.damage ?? selectedAction?.effect ?? '';
-    const { total, breakdown } = rollDamageExpr(expr);
-    setDamageVal(String(total));
-    setRolledBreakdown(breakdown);
+    setDamageFrom(damageParts.map(p => {
+      const { total, breakdown } = rollDiceExpr(p.dice);
+      return { type: p.type, amount: total, breakdown };
+    }));
+  }
+
+  function handleAverage() {
+    setDamageFrom(damageParts.map(p => ({ type: p.type, amount: p.average ?? 0, breakdown: `avg ${p.average ?? 0}` })));
+  }
+
+  function resetResolve() {
+    setDamageVal(''); setHealVal(''); setTempHpVal('');
+    setRolledBreakdown(''); setDefenseLines([]);
+    setConditionId(''); setConditionTurns('');
+  }
+
+  // After a Multiattack attack, go back to the picker for the next one until
+  // every attack is used; anything else closes the modal.
+  function finishAction() {
+    if (inMultiattack && maMade + 1 < maCount) {
+      setMaMade(n => n + 1);
+      setSelectedAction(null);
+      setSelectedTarget(null);
+      resetResolve();
+      setStep('action');
+    } else {
+      onClose();
+    }
   }
 
   function handleApply() {
@@ -804,7 +891,13 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
     if (!selectedTarget) return;
     if (isMonsterSpell) onSpendSpell(attacker.id, selectedAction.id, selectedTarget.name);
     onApply(selectedTarget.id, dmg, heal, tmpHp, selectedAction, attacker, conditionId || null, turns ?? null);
-    onClose();
+    finishAction();
+  }
+
+  function handleMiss() {
+    if (!selectedTarget) return;
+    onLog?.(`${attacker.name} → ${selectedTarget.name} [${selectedAction?.name ?? 'attack'}]: miss`);
+    finishAction();
   }
 
   const stepTitle = {
@@ -819,7 +912,7 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
     const tStatus = hpStatus(tHp, t.maxHp);
     return (
       <button key={t.id}
-        onClick={() => { setSelectedTarget(t); setDamageVal(''); setHealVal(''); setTempHpVal(''); setRolledBreakdown(''); setStep('damage'); }}
+        onClick={() => { setSelectedTarget(t); resetResolve(); setStep('damage'); }}
         style={{
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '10px 14px', borderRadius: 'var(--radius-sm)',
@@ -868,33 +961,57 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
           {/* ── Step 1: Action picker ── */}
           {step === 'action' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {attacks.length > 0 && (
+              {/* Multiattack tracker */}
+              {multiattack && (
+                <div style={{
+                  border: '1px solid var(--orange)', background: 'var(--orange-bg)',
+                  borderRadius: 'var(--radius-sm)', padding: '10px 14px', marginBottom: 4,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ flex: 1, fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>
+                      <span style={{ fontWeight: 700, fontStyle: 'italic', color: 'var(--orange-text)' }}>Multiattack. </span>
+                      {multiattackText(multiattack, attacks, attacker.baseName ?? attacker.name)}
+                    </div>
+                    <div className="slot-pips" style={{ flexShrink: 0 }} title={`${maMade} of ${maCount} attacks made`}>
+                      {Array.from({ length: maCount }).map((_, i) => (
+                        <div key={i} className="slot-pip" style={{
+                          cursor: 'default', borderColor: 'var(--orange)',
+                          background: i < maMade ? 'var(--orange)' : 'transparent',
+                        }} />
+                      ))}
+                    </div>
+                  </div>
+                  {maMade > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: 'var(--orange-text)' }}>
+                        Attack {maMade + 1} of {maCount} — choose the next attack
+                      </span>
+                      <button className="btn btn-ghost btn-sm" onClick={onClose}>End Multiattack</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {maOptions.length > 0 && (
                 <>
-                  <div className="section-heading" style={{ marginTop: 0 }}>Attacks</div>
-                  {attacks.map((atk, i) => (
-                    <button key={i} onClick={() => { setSelectedAction({ ...atk, actionType: 'attack' }); setStep('target'); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '10px 14px', borderRadius: 'var(--radius-sm)',
-                        border: '1px solid var(--border)', background: 'var(--surface)',
-                        cursor: 'pointer', textAlign: 'left', width: '100%',
-                        transition: 'background 0.1s',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface2)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{atk.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
-                          {atk.hitBonus !== undefined && `${atk.hitBonus >= 0 ? '+' : ''}${atk.hitBonus} to hit`}
-                          {atk.hitBonus !== undefined && atk.damage && ' · '}
-                          {atk.damage && `${atk.damage} ${atk.damageType ?? ''}`}
-                        </div>
-                      </div>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
-                        <polyline points="9 18 15 12 9 6" />
-                      </svg>
-                    </button>
+                  <div className="section-heading" style={{ marginTop: 0, color: 'var(--orange-text)' }}>
+                    Multiattack Options · {numberWord(maCount)} attacks
+                  </div>
+                  {maOptions.map((atk, i) => (
+                    <AttackPickButton key={atk.id || i} atk={atk} multi
+                      onPick={() => { setSelectedAction({ ...atk, actionType: 'attack' }); setStep('target'); }} />
+                  ))}
+                </>
+              )}
+
+              {otherAttacks.length > 0 && (
+                <>
+                  <div className="section-heading" style={{ marginTop: maOptions.length > 0 ? 8 : 0 }}>
+                    {maOptions.length > 0 ? 'Other Attacks' : 'Attacks'}
+                  </div>
+                  {otherAttacks.map((atk, i) => (
+                    <AttackPickButton key={atk.id || i} atk={atk}
+                      onPick={() => { setSelectedAction({ ...atk, actionType: 'attack' }); setStep('target'); }} />
                   ))}
                 </>
               )}
@@ -1120,15 +1237,45 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
                     onChange={e => setDamageVal(e.target.value)}
                     style={{ flex: 1, padding: '8px 12px', fontSize: 20, fontFamily: 'DM Mono, monospace', fontWeight: 500, textAlign: 'center' }}
                   />
-                  {selectedAction?.damage && (
-                    <button className="btn btn-ghost" onClick={handleRoll} style={{ flexShrink: 0 }}>
-                      🎲 Roll {selectedAction.damage}
-                    </button>
+                  {damageParts.length > 0 && (
+                    <>
+                      <button className="btn btn-ghost" onClick={handleRoll} style={{ flexShrink: 0 }}>
+                        🎲 Roll {damageParts.map(p => p.dice).join(' + ')}
+                      </button>
+                      {damageParts.every(p => p.average !== null && p.average !== undefined) && (
+                        <button className="btn btn-ghost" onClick={handleAverage} style={{ flexShrink: 0 }}
+                          title="Use the average damage">
+                          Avg {damageParts.reduce((s, p) => s + p.average, 0)}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
+                {damageParts.length > 1 && !rolledBreakdown && (
+                  <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 4 }}>
+                    {damageParts.map(p => `${p.dice} ${p.type}`).join(' + ')}
+                  </div>
+                )}
                 {rolledBreakdown && (
                   <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 4 }}>
                     = {rolledBreakdown}
+                  </div>
+                )}
+                {defenseLines.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                    {defenseLines.map(l => (
+                      <span key={l.type} className={`tag ${l.response === 'immune' ? 'tag-green' : 'tag-amber'}`} style={{ fontSize: 10 }}>
+                        {damageTypeLabel(l.type)} {l.response === 'immune' ? 'immune' : 'resisted'}: {l.raw} → {l.final}
+                      </span>
+                    ))}
+                  </div>
+                ) : notedDefenses.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                    {notedDefenses.map(d => (
+                      <span key={d.type} className={`tag ${d.response === 'immune' ? 'tag-green' : 'tag-amber'}`} style={{ fontSize: 10 }}>
+                        {selectedTarget.name} is {d.response === 'immune' ? 'immune to' : 'resistant to'} {damageTypeLabel(d.type)}
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
@@ -1171,7 +1318,11 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <select value={conditionId} onChange={e => setConditionId(e.target.value)} style={{ flex: 1 }}>
                     <option value="">— None —</option>
-                    {CONDITIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    {CONDITIONS.map(c => (
+                      <option key={c.id} value={c.id} disabled={conditionImmune.has(c.id)}>
+                        {c.label}{conditionImmune.has(c.id) ? ' — immune' : ''}
+                      </option>
+                    ))}
                   </select>
                   <input
                     type="number"
@@ -1185,13 +1336,21 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onClose }) {
                 </div>
               </div>
 
-              <button
-                className="btn btn-accent btn-full"
-                onClick={handleApply}
-                disabled={!isMonsterSpell && !damageVal && !healVal && !tempHpVal && !conditionId}
-              >
-                {isMonsterSpell ? 'Cast & Apply' : 'Apply'}
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {selectedAction?.actionType === 'attack' && (
+                  <button className="btn btn-ghost" onClick={handleMiss} style={{ flexShrink: 0 }}>
+                    Miss
+                  </button>
+                )}
+                <button
+                  className="btn btn-accent btn-full"
+                  onClick={handleApply}
+                  disabled={!isMonsterSpell && !damageVal && !healVal && !tempHpVal && !conditionId}
+                >
+                  {isMonsterSpell ? 'Cast & Apply' : 'Apply'}
+                  {inMultiattack && maMade + 1 < maCount ? ` · next attack (${maMade + 2}/${maCount})` : ''}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1973,6 +2132,7 @@ export default function CombatRunner({
           combatants={combatants}
           onApply={onApplyAction}
           onSpendSpell={spendSpell}
+          onLog={msg => addLog(msg, round)}
           onClose={() => setActionModal(null)}
         />
       )}

@@ -176,8 +176,7 @@ function guessSpellcastingAbility(abilities) {
     (abilities[ab] ?? 0) > (abilities[best] ?? 0) ? ab : best, 'cha')
 }
 
-export function monsterNeedsMigration(monster) {
-  if (!monster) return false
+function spellsNeedMigration(monster) {
   const spells = monster.spells ?? []
   if (spells.some(isLegacySpell)) return true
   if (spells.length > 0 && !monster.spellcasting) return true
@@ -185,10 +184,25 @@ export function monsterNeedsMigration(monster) {
   return false
 }
 
+export function monsterNeedsMigration(monster) {
+  if (!monster) return false
+  if (spellsNeedMigration(monster)) return true
+  if ((monster.attacks ?? []).some(attackNeedsMigration)) return true
+  return false
+}
+
 // Bring a monster (library entry or encounter snapshot) to the current spell
-// format. Returns the same object when nothing needs to change.
+// and attack format. Returns the same object when nothing needs to change.
 export function normalizeMonster(monster) {
   if (!monsterNeedsMigration(monster)) return monster
+  const withAttacks = (monster.attacks ?? []).some(attackNeedsMigration)
+    ? { ...monster, attacks: monster.attacks.map(normalizeAttack) }
+    : monster
+  if (!spellsNeedMigration(withAttacks)) return withAttacks
+  return migrateMonsterSpells(withAttacks)
+}
+
+function migrateMonsterSpells(monster) {
   const oldSpells = monster.spells ?? []
   const spells = oldSpells.map((s, i) => migrateMonsterSpell(s, i))
 
@@ -223,6 +237,11 @@ export const EMPTY_MONSTER = {
   initiativeMod: 0,
   abilities: { ...DEFAULT_ABILITIES },
   attacks: [],
+  multiattack: null,        // null = no Multiattack, otherwise { count, description }
+  skills: [],               // [{ skill: 'perception', bonus: 4 }]
+  resistances: [],          // damage types, e.g. ['poison']
+  immunities: [],           // damage types, e.g. ['poison', 'psychic']
+  conditionImmunities: [],  // condition ids, e.g. ['charmed', 'poisoned']
   spells: [],
   spellcasting: null,
   notes: '',
@@ -251,9 +270,325 @@ export const EMPTY_ATTACK = {
   id: '',
   name: '',
   hitBonus: 0,
-  damage: '1d6',
+  melee: true,             // Melee and Ranged can both be true ("Melee or Ranged Attack Roll")
+  ranged: false,
+  reach: 5,                // ft, used when melee
+  range: '',               // e.g. '120' or '80/320', used when ranged
+  damage: '1d6',           // primary damage dice
   damageType: 'slashing',
+  damageAverage: null,     // null = calculate from the dice
+  extraDamage: [],         // up to MAX_EXTRA_DAMAGE × { id, dice, type, average }
+  multiattack: false,      // can be used as part of the owner's Multiattack
   notes: '',
+}
+
+// ─── Attacks ──────────────────────────────────────────────────────────────────
+
+export const MAX_EXTRA_DAMAGE = 3
+
+export const EMPTY_DAMAGE_PART = {
+  id: '',
+  dice: '1d6',
+  type: 'poison',
+  average: null,           // null = calculate from the dice
+}
+
+export const EMPTY_MULTIATTACK = {
+  count: 2,
+  description: '',         // blank = generate "The X makes two Y attacks."
+}
+
+// Average of a dice expression, rounded down the way stat blocks print it.
+// "3d8+3" → 16, "5d6" → 17, "4" → 4, "2d6 + 1d4 - 1" → 8. Returns null when the
+// text isn't a dice expression.
+export function diceAverage(expr) {
+  const s = String(expr ?? '').replace(/\s+/g, '').toLowerCase()
+  if (!s) return null
+  const terms = s.match(/[+-]?[^+-]+/g)
+  if (!terms) return null
+  let total = 0
+  for (const term of terms) {
+    const sign = term.startsWith('-') ? -1 : 1
+    const body = term.replace(/^[+-]/, '')
+    const dice = body.match(/^(\d*)d(\d+)$/)
+    if (dice) {
+      const count = parseInt(dice[1] || '1')
+      const sides = parseInt(dice[2])
+      total += sign * count * (sides + 1) / 2
+    } else if (/^\d+$/.test(body)) {
+      total += sign * parseInt(body)
+    } else {
+      return null
+    }
+  }
+  return Math.max(0, Math.floor(total))
+}
+
+// Roll a dice expression with any number of terms ("2d6+1d4+3").
+// Returns { total, breakdown } — breakdown like "[4+2]+3".
+export function rollDiceExpr(expr) {
+  const s = String(expr ?? '').replace(/\s+/g, '').toLowerCase()
+  if (!s) return { total: 0, breakdown: '0' }
+  const terms = s.match(/[+-]?[^+-]+/g) ?? []
+  let total = 0
+  const pieces = []
+  for (const term of terms) {
+    const sign = term.startsWith('-') ? -1 : 1
+    const body = term.replace(/^[+-]/, '')
+    const dice = body.match(/^(\d*)d(\d+)$/)
+    if (dice) {
+      const count = parseInt(dice[1] || '1')
+      const sides = parseInt(dice[2])
+      const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1)
+      total += sign * rolls.reduce((a, b) => a + b, 0)
+      const str = rolls.length > 1 ? `[${rolls.join('+')}]` : String(rolls[0])
+      pieces.push(pieces.length === 0 && sign > 0 ? str : `${sign < 0 ? '-' : '+'}${str}`)
+    } else {
+      const n = parseInt(body) || 0
+      total += sign * n
+      pieces.push(pieces.length === 0 && sign > 0 ? String(n) : `${sign < 0 ? '-' : '+'}${n}`)
+    }
+  }
+  return { total: Math.max(0, total), breakdown: pieces.join('') || '0' }
+}
+
+// "3d8+3" → "3d8 + 3"
+export function prettyDice(expr) {
+  return String(expr ?? '').trim().replace(/\s*([+-])\s*/g, ' $1 ')
+}
+
+function capitalize(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
+}
+
+// Guess melee / ranged for attacks saved before the toggles existed.
+const RANGED_ONLY = /\b(bow|shortbow|longbow|crossbow|sling|dart|blowgun|spray|web|rock|needles)\b/i
+const THROWN = /\b(javelin|dagger|spear|handaxe|trident|light hammer)\b/i
+
+export function attackNeedsMigration(atk) {
+  return !!atk && (
+    atk.melee === undefined || atk.ranged === undefined ||
+    atk.extraDamage === undefined || atk.multiattack === undefined
+  )
+}
+
+// Fill in fields added after an attack was saved. Same object if nothing is missing.
+export function normalizeAttack(atk) {
+  if (!attackNeedsMigration(atk)) return atk
+  const name = atk.name ?? ''
+  let melee = atk.melee
+  let ranged = atk.ranged
+  if (melee === undefined && ranged === undefined) {
+    if (RANGED_ONLY.test(name))  { melee = false; ranged = true }
+    else if (THROWN.test(name))  { melee = true;  ranged = true }
+    else                         { melee = true;  ranged = false }
+  }
+  return {
+    ...EMPTY_ATTACK,
+    ...atk,
+    melee: melee ?? true,
+    ranged: ranged ?? false,
+    reach: atk.reach ?? 5,
+    range: atk.range ?? '',
+    damageAverage: atk.damageAverage ?? null,
+    extraDamage: atk.extraDamage ?? [],
+    multiattack: atk.multiattack ?? false,
+    notes: atk.notes ?? '',
+  }
+}
+
+// The value to show for a damage part: the typed override, else the dice average.
+export function partAverage(dice, override) {
+  if (override !== null && override !== undefined && override !== '') return Number(override)
+  return diceAverage(dice)
+}
+
+// Every damage component of an attack, primary first:
+// [{ dice, type, average }]. Parts without dice are skipped.
+export function attackDamageParts(atk) {
+  if (!atk) return []
+  const parts = []
+  if (atk.damage) {
+    parts.push({ dice: atk.damage, type: atk.damageType ?? '', average: partAverage(atk.damage, atk.damageAverage) })
+  }
+  for (const p of atk.extraDamage ?? []) {
+    if (!p?.dice) continue
+    parts.push({ dice: p.dice, type: p.type ?? '', average: partAverage(p.dice, p.average) })
+  }
+  return parts
+}
+
+// "16 (3d8 + 3) Force" — flat damage prints as just the number: "1 Piercing".
+export function formatDamagePart(part) {
+  const flat = /^\d+$/.test(String(part.dice).trim())
+  const type = capitalize(part.type)
+  if (flat) return `${part.dice}${type ? ` ${type}` : ''}`
+  const avg = part.average !== null && part.average !== undefined ? `${part.average} ` : ''
+  return `${avg}(${prettyDice(part.dice)})${type ? ` ${type}` : ''}`
+}
+
+// "7 (1d6 + 4) Piercing plus 17 (5d6) Poison"
+export function attackDamageText(atk) {
+  return attackDamageParts(atk).map(formatDamagePart).join(' plus ')
+}
+
+// Total average across all damage parts.
+export function attackAverageTotal(atk) {
+  return attackDamageParts(atk).reduce((sum, p) => sum + (p.average ?? 0), 0)
+}
+
+// "Melee" | "Ranged" | "Melee or Ranged"
+export function attackKindLabel(atk) {
+  const a = normalizeAttack(atk)
+  if (a.melee && a.ranged) return 'Melee or Ranged'
+  if (a.ranged) return 'Ranged'
+  return 'Melee'
+}
+
+function rangeText(range) {
+  const r = String(range ?? '').trim()
+  if (!r) return ''
+  return /ft\.?$/i.test(r) ? `range ${r}` : `range ${r} ft.`
+}
+
+// "reach 5 ft. or range 120 ft."
+export function attackReachText(atk) {
+  const a = normalizeAttack(atk)
+  const parts = []
+  if (a.melee) parts.push(`reach ${a.reach ?? 5} ft.`)
+  if (a.ranged && rangeText(a.range)) parts.push(rangeText(a.range))
+  return parts.join(' or ')
+}
+
+// ─── Multiattack ──────────────────────────────────────────────────────────────
+
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
+
+export function numberWord(n) {
+  return NUMBER_WORDS[n] ?? String(n)
+}
+
+export function multiattackOptions(attacks = []) {
+  return attacks.filter(a => a?.multiattack)
+}
+
+// The Multiattack sentence. Uses the custom description when one is written;
+// otherwise e.g. "The mage makes three Arcane Burst attacks." or
+// "The assassin makes three attacks, using Shortsword or Light Crossbow in any combination."
+export function multiattackText(multiattack, attacks = [], ownerName = '') {
+  if (!multiattack) return ''
+  if (multiattack.description?.trim()) return multiattack.description.trim()
+  const who = ownerName ? `The ${ownerName.toLowerCase()}` : 'It'
+  const count = numberWord(multiattack.count ?? 2)
+  const names = multiattackOptions(attacks).map(a => a.name || 'Unnamed Attack')
+  if (names.length === 0) return `${who} makes ${count} attacks.`
+  if (names.length === 1) return `${who} makes ${count} ${names[0]} attacks.`
+  const list = names.length === 2
+    ? `${names[0]} or ${names[1]}`
+    : `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`
+  return `${who} makes ${count} attacks, using ${list} in any combination.`
+}
+
+// ─── Skills ───────────────────────────────────────────────────────────────────
+
+export const SKILLS = [
+  { id: 'acrobatics',     label: 'Acrobatics',      ability: 'dex' },
+  { id: 'animalHandling', label: 'Animal Handling', ability: 'wis' },
+  { id: 'arcana',         label: 'Arcana',          ability: 'int' },
+  { id: 'athletics',      label: 'Athletics',       ability: 'str' },
+  { id: 'deception',      label: 'Deception',       ability: 'cha' },
+  { id: 'history',        label: 'History',         ability: 'int' },
+  { id: 'insight',        label: 'Insight',         ability: 'wis' },
+  { id: 'intimidation',   label: 'Intimidation',    ability: 'cha' },
+  { id: 'investigation',  label: 'Investigation',   ability: 'int' },
+  { id: 'medicine',       label: 'Medicine',        ability: 'wis' },
+  { id: 'nature',         label: 'Nature',          ability: 'int' },
+  { id: 'perception',     label: 'Perception',      ability: 'wis' },
+  { id: 'performance',    label: 'Performance',     ability: 'cha' },
+  { id: 'persuasion',     label: 'Persuasion',      ability: 'cha' },
+  { id: 'religion',       label: 'Religion',        ability: 'int' },
+  { id: 'sleightOfHand',  label: 'Sleight of Hand', ability: 'dex' },
+  { id: 'stealth',        label: 'Stealth',         ability: 'dex' },
+  { id: 'survival',       label: 'Survival',        ability: 'wis' },
+]
+
+export function skillDef(id) {
+  return SKILLS.find(s => s.id === id)
+}
+
+// Proficiency bonus from challenge rating ("1/4", "0.5", "6"…).
+export function proficiencyBonusForCR(cr) {
+  let n
+  const s = String(cr ?? '').trim()
+  if (s.includes('/')) {
+    const [a, b] = s.split('/').map(Number)
+    n = b ? a / b : 0
+  } else {
+    n = parseFloat(s)
+  }
+  if (isNaN(n) || n < 5) return 2
+  return Math.min(9, 2 + Math.ceil((n - 4) / 4))
+}
+
+// Standard skill bonus: ability modifier + proficiency bonus.
+export function defaultSkillBonus(skillId, abilities, cr) {
+  const def = skillDef(skillId)
+  const score = def ? (abilities?.[def.ability] ?? 10) : 10
+  return abilityMod(score) + proficiencyBonusForCR(cr)
+}
+
+// Skills in stat block (alphabetical) order.
+export function sortedSkills(skills = []) {
+  const order = id => {
+    const i = SKILLS.findIndex(s => s.id === id)
+    return i === -1 ? 999 : i
+  }
+  return [...skills].sort((a, b) => order(a.skill) - order(b.skill))
+}
+
+// ─── Damage & condition defenses ──────────────────────────────────────────────
+
+export function damageTypeLabel(type) {
+  return capitalize(type)
+}
+
+export function conditionLabel(id) {
+  return CONDITIONS.find(c => c.toLowerCase() === String(id).toLowerCase()) ?? capitalize(id)
+}
+
+export function hasDefenses(m) {
+  return !!m && (
+    (m.skills?.length ?? 0) > 0 ||
+    (m.resistances?.length ?? 0) > 0 ||
+    (m.immunities?.length ?? 0) > 0 ||
+    (m.conditionImmunities?.length ?? 0) > 0
+  )
+}
+
+// How a target takes one damage type: 'immune' | 'resistant' | 'normal'.
+export function damageResponse(target, type) {
+  const t = String(type ?? '').toLowerCase()
+  if (!t || !target) return 'normal'
+  if ((target.immunities ?? []).includes(t)) return 'immune'
+  if ((target.resistances ?? []).includes(t)) return 'resistant'
+  return 'normal'
+}
+
+// Apply a target's immunities / resistances to rolled damage. Damage of the
+// same type is added together before halving.
+// rolled: [{ type, amount, breakdown? }] → { total, lines: [{ type, raw, final, response }] }
+export function applyDamageDefenses(rolled, target) {
+  const byType = new Map()
+  for (const r of rolled) {
+    const key = String(r.type ?? '').toLowerCase()
+    byType.set(key, (byType.get(key) ?? 0) + (r.amount ?? 0))
+  }
+  const lines = [...byType.entries()].map(([type, raw]) => {
+    const response = damageResponse(target, type)
+    const final = response === 'immune' ? 0 : response === 'resistant' ? Math.floor(raw / 2) : raw
+    return { type, raw, final, response }
+  })
+  return { total: lines.reduce((s, l) => s + l.final, 0), lines }
 }
 
 // Player spells still use levels and slots.

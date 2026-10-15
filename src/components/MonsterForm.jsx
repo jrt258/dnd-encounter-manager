@@ -2,20 +2,32 @@ import { useState } from 'react'
 import AbilityScores from './AbilityScores'
 import AttackEditor from './AttackEditor'
 import MonsterSpellEditor from './MonsterSpellEditor'
+import MonsterDefensesEditor from './MonsterDefensesEditor'
 import { MONSTER_TYPES, EMPTY_MONSTER, normalizeMonster } from '../utils/helpers'
 
-const TABS = ['Stats', 'Attacks', 'Spells', 'Notes']
+const TABS = ['Stats', 'Skills & Defenses', 'Attacks', 'Spells', 'Notes']
 
 export default function MonsterForm({ initial, onSave, onClose }) {
   const [data, setData] = useState(() => normalizeMonster({
     ...EMPTY_MONSTER,
     spells: [],
     attacks: [],
+    skills: [],
+    resistances: [],
+    immunities: [],
+    conditionImmunities: [],
     ...(initial ?? {}),
   }))
   const [tab, setTab] = useState('Stats')
 
   const set = (field, val) => setData(d => ({ ...d, [field]: val }))
+  const merge = changes => setData(d => ({ ...d, ...changes }))
+
+  const defenseCount =
+    (data.skills?.length ?? 0) +
+    (data.resistances?.length ?? 0) +
+    (data.immunities?.length ?? 0) +
+    (data.conditionImmunities?.length ?? 0)
 
   function handleSave() {
     if (!data.name.trim()) { alert('Monster needs a name!'); return }
@@ -25,6 +37,12 @@ export default function MonsterForm({ initial, onSave, onClose }) {
     onSave({ ...rest, spellcasting, maxHp: data.hp })
   }
 
+  const badge = n => (
+    <span style={{ marginLeft: 5, fontSize: 10, background: 'var(--surface2)', color: 'var(--text3)', padding: '1px 5px', borderRadius: 99 }}>
+      {n}
+    </span>
+  )
+
   return (
     <div>
       {/* Tab bar */}
@@ -32,6 +50,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
         display: 'flex',
         borderBottom: '1px solid var(--border)',
         marginBottom: 18,
+        overflowX: 'auto',
       }}>
         {TABS.map(t => (
           <button
@@ -50,19 +69,13 @@ export default function MonsterForm({ initial, onSave, onClose }) {
               borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
               marginBottom: -1,
               transition: 'color 0.12s',
+              whiteSpace: 'nowrap',
             }}
           >
             {t}
-            {t === 'Attacks' && data.attacks?.length > 0 && (
-              <span style={{ marginLeft: 5, fontSize: 10, background: 'var(--surface2)', color: 'var(--text3)', padding: '1px 5px', borderRadius: 99 }}>
-                {data.attacks.length}
-              </span>
-            )}
-            {t === 'Spells' && data.spells?.length > 0 && (
-              <span style={{ marginLeft: 5, fontSize: 10, background: 'var(--surface2)', color: 'var(--text3)', padding: '1px 5px', borderRadius: 99 }}>
-                {data.spells.length}
-              </span>
-            )}
+            {t === 'Skills & Defenses' && defenseCount > 0 && badge(defenseCount)}
+            {t === 'Attacks' && data.attacks?.length > 0 && badge(data.attacks.length)}
+            {t === 'Spells' && data.spells?.length > 0 && badge(data.spells.length)}
           </button>
         ))}
       </div>
@@ -76,6 +89,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
             <div style={{ flex: 3 }}>
               <div className="field-label">Monster Name *</div>
               <input
+                type="text"
                 value={data.name}
                 placeholder="e.g. Goblin Shaman"
                 onChange={e => set('name', e.target.value)}
@@ -90,6 +104,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
             <div style={{ flex: 1 }}>
               <div className="field-label">CR</div>
               <input
+                type="text"
                 value={data.cr}
                 placeholder="1/4"
                 onChange={e => set('cr', e.target.value)}
@@ -172,11 +187,19 @@ export default function MonsterForm({ initial, onSave, onClose }) {
         </div>
       )}
 
+      {/* Skills & Defenses tab */}
+      {tab === 'Skills & Defenses' && (
+        <MonsterDefensesEditor data={data} onChange={merge} />
+      )}
+
       {/* Attacks tab */}
       {tab === 'Attacks' && (
         <AttackEditor
           attacks={data.attacks ?? []}
           onChange={val => set('attacks', val)}
+          multiattack={data.multiattack ?? null}
+          onChangeMultiattack={val => set('multiattack', val)}
+          ownerName={data.name}
         />
       )}
 

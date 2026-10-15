@@ -3,7 +3,9 @@ import Modal from '../components/Modal';
 import MonsterForm from '../components/MonsterForm';
 import PlayerForm from '../components/PlayerForm';
 import SpellcastingBlock from '../components/SpellcastingBlock';
-import { normalizeMonster } from '../utils/helpers';
+import AttacksBlock from '../components/AttacksBlock';
+import MonsterTraitsBlock from '../components/MonsterTraitsBlock';
+import { normalizeMonster, hasDefenses } from '../utils/helpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -156,29 +158,17 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
         </div>
       )}
 
-      {m.attacks?.length > 0 && (
+      {hasDefenses(m) && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="section-heading" style={{ marginTop: 0 }}>Skills &amp; Defenses</div>
+          <MonsterTraitsBlock monster={m} />
+        </div>
+      )}
+
+      {(m.attacks?.length > 0 || m.multiattack) && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Actions</div>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-            {m.attacks.map((atk, i) => (
-              <div key={i} style={{ padding: '10px 14px', borderBottom: i < m.attacks.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: atk.notes ? 4 : 0 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{atk.name}</span>
-                  {atk.hitBonus !== undefined && (
-                    <span style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: 'var(--blue-text)', background: 'var(--blue-bg)', padding: '1px 7px', borderRadius: 99 }}>
-                      {modStr(atk.hitBonus)} to hit
-                    </span>
-                  )}
-                  {atk.damage && (
-                    <span style={{ fontSize: 12, fontFamily: 'DM Mono, monospace', color: 'var(--accent-text)', background: 'var(--accent-bg)', padding: '1px 7px', borderRadius: 99 }}>
-                      {atk.damage} {atk.damageType ?? ''}
-                    </span>
-                  )}
-                </div>
-                {atk.notes && <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{atk.notes}</div>}
-              </div>
-            ))}
-          </div>
+          <AttacksBlock attacks={m.attacks ?? []} multiattack={m.multiattack} ownerName={m.name} />
         </div>
       )}
 

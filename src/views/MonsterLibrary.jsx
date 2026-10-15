@@ -2,7 +2,9 @@ import { useState, useMemo } from 'react';
 import MonsterForm from '../components/MonsterForm';
 import Modal from '../components/Modal';
 import SpellcastingBlock from '../components/SpellcastingBlock';
-import { uid } from '../utils/helpers';
+import AttacksBlock from '../components/AttacksBlock';
+import MonsterTraitsBlock from '../components/MonsterTraitsBlock';
+import { uid, hasDefenses } from '../utils/helpers';
 
 const CR_BRACKETS = [
   { label: 'All CR', value: 'all' },
@@ -103,7 +105,11 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
     setEffectiveEditing({
       ...copy,
       name: `${monster.name} (Copy)`,
-      attacks: (copy.attacks ?? []).map(a => ({ ...a, id: uid() })),
+      attacks: (copy.attacks ?? []).map(a => ({
+        ...a,
+        id: uid(),
+        extraDamage: (a.extraDamage ?? []).map(p => ({ ...p, id: uid() })),
+      })),
       spells: (copy.spells ?? []).map(s => ({ ...s, id: uid() })),
       isClone: true,
     });
@@ -322,18 +328,16 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                                 </div>
                               </div>
                             )}
-                            {m.attacks?.length > 0 && (
+                            {hasDefenses(m) && (
+                              <div>
+                                <div className="section-heading" style={{ marginTop: 0 }}>Skills &amp; Defenses</div>
+                                <MonsterTraitsBlock monster={m} />
+                              </div>
+                            )}
+                            {(m.attacks?.length > 0 || m.multiattack) && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Attacks</div>
-                                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                                  {m.attacks.map((atk, i) => (
-                                    <div className="attack-row" key={i}>
-                                      <span className="attack-name">{atk.name}</span>
-                                      {atk.hitBonus !== undefined && <span className="attack-stat">{atk.hitBonus >= 0 ? '+' : ''}{atk.hitBonus} to hit</span>}
-                                      {atk.damage && <span className="attack-stat">{atk.damage} {atk.damageType ?? ''}</span>}
-                                    </div>
-                                  ))}
-                                </div>
+                                <AttacksBlock attacks={m.attacks ?? []} multiattack={m.multiattack} ownerName={m.name} />
                               </div>
                             )}
                             {m.spells?.length > 0 && (
