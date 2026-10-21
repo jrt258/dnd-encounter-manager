@@ -2,10 +2,12 @@ import {
   sortedSkills, skillDef, modStr, damageTypeLabel, conditionLabel, hasDefenses,
 } from '../utils/helpers'
 
-// Read-only Skills / Resistances / Immunities lines, laid out like a stat block:
-//   Skills       Arcana +6, History +6, Perception +4
-//   Resistances  Poison
-//   Immunities   Poison, Psychic; Charmed, Deafened, …
+// Read-only Skills / Vulnerabilities / Resistances / Immunities lines, laid out
+// in stat block order:
+//   Skills           Arcana +6, History +6, Perception +4
+//   Vulnerabilities  Bludgeoning
+//   Resistances      Cold
+//   Immunities       Poison, Psychic; Charmed, Deafened, …
 // Renders nothing when the monster has none of them.
 
 function Line({ label, children }) {
@@ -35,6 +37,7 @@ export default function MonsterTraitsBlock({ monster }) {
   const skills = sortedSkills(monster.skills ?? [])
   const resistances = (monster.resistances ?? []).map(damageTypeLabel)
   const immunities = (monster.immunities ?? []).map(damageTypeLabel)
+  const vulnerabilities = (monster.vulnerabilities ?? []).map(damageTypeLabel)
   const conditions = (monster.conditionImmunities ?? []).map(conditionLabel)
 
   return (
@@ -49,6 +52,9 @@ export default function MonsterTraitsBlock({ monster }) {
             </span>
           ))}
         </Line>
+      )}
+      {vulnerabilities.length > 0 && (
+        <Line label="Vulnerabilities">{joinWords(vulnerabilities, 'var(--accent-text)')}</Line>
       )}
       {resistances.length > 0 && (
         <Line label="Resistances">{joinWords(resistances, 'var(--amber-text)')}</Line>

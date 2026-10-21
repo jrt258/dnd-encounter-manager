@@ -8,7 +8,8 @@ import AbilityGrid from '../components/AbilityGrid';
 import {
   normalizeMonster, isLimitedSpell, spellFrequencyLabel, spellDefenseLine, SPELL_ACTION_TYPES,
   normalizeAttack, attackDamageParts, attackDamageText, attackKindLabel, attackReachText,
-  multiattackText, numberWord, diceAverage, rollDiceExpr, applyDamageDefenses, damageResponse,
+  multiattackText, multiattackSpellOptions, numberWord, diceAverage, rollDiceExpr,
+  applyDamageDefenses, damageResponse, DAMAGE_RESPONSE_LABELS, damageTypeFromText,
   damageTypeLabel, hasDefenses, hasOtherSpeeds, speedText,
 } from '../utils/helpers';
 
@@ -520,6 +521,8 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, onSetSp
                 attacks={c.attacks ?? []}
                 multiattack={c.type === 'monster' ? (c.template?.multiattack ?? null) : null}
                 ownerName={c.baseName ?? c.name}
+                spells={c.type === 'monster' ? (c.spells ?? []) : []}
+                spellcasting={c.type === 'monster' ? (c.spellcasting ?? null) : null}
               />
             </div>
           )}
@@ -550,6 +553,7 @@ function CombatantExpand({ c, onUpdate, onToggleSlot, onToggleCondition, onSetSp
                 spells={c.spells}
                 usedSpells={c.usedSpells ?? {}}
                 onSetUses={(spellId, used) => onSetSpellUses(c.id, spellId, used)}
+                multiattack={c.template?.multiattack ?? null}
               />
             </div>
           )}
@@ -783,6 +787,51 @@ function AttackPickButton({ atk, multi, onPick }) {
   );
 }
 
+// One monster spell in the action picker. `left` is null for At Will spells.
+// Multiattack spell options get the same orange edge and tag as attacks.
+function SpellPickButton({ sp, spellcasting, left, multi, onPick }) {
+  const exhausted = left === 0;
+  const defense = spellDefenseLine(sp, spellcasting);
+  return (
+    <button disabled={exhausted}
+      onClick={() => !exhausted && onPick()}
+      title={exhausted ? 'No uses left today — restore a pip in the expanded panel to cast again' : ''}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+        border: '1px solid var(--border)', background: 'var(--surface)',
+        borderLeft: multi ? '3px solid var(--orange)' : '1px solid var(--border)',
+        cursor: exhausted ? 'not-allowed' : 'pointer', textAlign: 'left', width: '100%',
+        transition: 'background 0.1s', opacity: exhausted ? 0.5 : 1,
+      }}
+      onMouseEnter={e => { if (!exhausted) e.currentTarget.style.background = 'var(--surface2)'; }}
+      onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name || 'Unnamed Spell'}</span>
+          <span className="tag tag-purple" style={{ fontSize: 9 }}>{multi ? `Spell · ${spellFrequencyLabel(sp)}` : spellFrequencyLabel(sp)}</span>
+          {sp.castLevel ? <span className="tag tag-gray" style={{ fontSize: 9 }}>Lvl {sp.castLevel}</span> : null}
+          {sp.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
+          {multi && <span className="tag tag-orange" style={{ fontSize: 9 }}>Multiattack</span>}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+          {[defense, sp.effect].filter(Boolean).join(' · ') || '—'}
+        </div>
+      </div>
+      {left !== null && (
+        <span style={{ fontSize: 11, fontFamily: 'DM Mono, monospace', flexShrink: 0,
+          color: exhausted ? 'var(--accent)' : 'var(--purple-text)' }}>
+          {exhausted ? 'none left' : `${left}/${sp.usesPerDay} left`}
+        </span>
+      )}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
+  );
+}
+
 function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClose }) {
   const [step, setStep]           = useState('action');
   const [selectedAction, setSelectedAction] = useState(null);
@@ -804,25 +853,31 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClo
   const maCount = multiattack?.count ?? 0;
   const maOptions = multiattack ? attacks.filter(a => a.multiattack) : [];
   const otherAttacks = multiattack ? attacks.filter(a => !a.multiattack) : attacks;
-  const inMultiattack = !!multiattack && selectedAction?.actionType === 'attack' && !!selectedAction?.multiattack;
+  // Action spells marked for Multiattack (e.g. a cantrip cast in place of an attack).
+  const maSpellOptions = multiattack ? multiattackSpellOptions(attacker.spells ?? []) : [];
+  const maSpellIds = new Set(maSpellOptions.map(sp => sp.id));
+  // True while resolving an attack or spell picked from the Multiattack options.
+  const inMultiattack = !!multiattack && !!selectedAction?.fromMultiattack;
 
   // Damage components of the chosen action. Attacks can carry several damage
-  // types; spells and custom actions have a single untyped expression.
+  // types; spells and custom actions have a single expression, typed when the
+  // spell's effect text names a damage type ("3d6 fire damage").
   const damageParts = selectedAction?.actionType === 'attack'
     ? attackDamageParts(selectedAction)
     : (selectedAction?.damage
-        ? [{ dice: selectedAction.damage, type: '', average: diceAverage(selectedAction.damage) }]
+        ? [{ dice: selectedAction.damage, type: selectedAction.damageType ?? '', average: diceAverage(selectedAction.damage) }]
         : []);
   const targetDefenses = selectedTarget?.template ?? null;
   const notedDefenses = damageParts
     .map(p => ({ type: p.type, response: damageResponse(targetDefenses, p.type) }))
     .filter((d, i, arr) => d.response !== 'normal' && arr.findIndex(x => x.type === d.type) === i);
   const conditionImmune = new Set(targetDefenses?.conditionImmunities ?? []);
-  // Players keep the old list (spells with an effect); monsters list every spell.
+  // Players keep the old list (spells with an effect); monsters list every spell
+  // except the ones already shown under Multiattack Options.
   const spells  = isMonster
-    ? (attacker.spells ?? [])
+    ? (attacker.spells ?? []).filter(sp => !maSpellIds.has(sp.id))
     : (attacker.spells ?? []).filter(s => s.effect || s.damage);
-  const hasActions = attacks.length > 0 || spells.length > 0;
+  const hasActions = attacks.length > 0 || spells.length > 0 || maSpellOptions.length > 0;
   const isMonsterSpell = selectedAction?.actionType === 'spell' && !!selectedAction?.monsterSpell;
 
   function usesLeft(sp) {
@@ -830,15 +885,24 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClo
     return Math.max(0, sp.usesPerDay - (attacker.usedSpells?.[sp.id] ?? 0));
   }
 
-  function pickMonsterSpell(sp) {
-    setSelectedAction({ ...sp, actionType: 'spell', monsterSpell: true, damage: diceFromText(sp.effect) });
+  function pickMonsterSpell(sp, fromMultiattack = false) {
+    setSelectedAction({
+      ...sp, actionType: 'spell', monsterSpell: true, fromMultiattack,
+      damage: diceFromText(sp.effect), damageType: damageTypeFromText(sp.effect),
+    });
     setStep('target');
   }
 
-  // Cast a spell that has no target (Misty Step, Shield…): spend the use and close.
+  function pickAttack(atk, fromMultiattack = false) {
+    setSelectedAction({ ...atk, actionType: 'attack', fromMultiattack });
+    setStep('target');
+  }
+
+  // Cast a spell that has no target (Misty Step, Shield…): spend the use, then
+  // either close or, inside Multiattack, move on to the next attack.
   function castWithoutTarget() {
     if (isMonsterSpell) onSpendSpell(attacker.id, selectedAction.id, null);
-    onClose();
+    finishAction();
   }
 
   const targets  = combatants.filter(c => c.id !== attacker.id && (c.maxHp - c.damage) > 0);
@@ -973,7 +1037,7 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClo
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{ flex: 1, fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>
                       <span style={{ fontWeight: 700, fontStyle: 'italic', color: 'var(--orange-text)' }}>Multiattack. </span>
-                      {multiattackText(multiattack, attacks, attacker.baseName ?? attacker.name)}
+                      {multiattackText(multiattack, attacks, attacker.baseName ?? attacker.name, attacker.spells ?? [])}
                     </div>
                     <div className="slot-pips" style={{ flexShrink: 0 }} title={`${maMade} of ${maCount} attacks made`}>
                       {Array.from({ length: maCount }).map((_, i) => (
@@ -995,26 +1059,30 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClo
                 </div>
               )}
 
-              {maOptions.length > 0 && (
+              {(maOptions.length > 0 || maSpellOptions.length > 0) && (
                 <>
                   <div className="section-heading" style={{ marginTop: 0, color: 'var(--orange-text)' }}>
                     Multiattack Options · {numberWord(maCount)} attacks
                   </div>
                   {maOptions.map((atk, i) => (
                     <AttackPickButton key={atk.id || i} atk={atk} multi
-                      onPick={() => { setSelectedAction({ ...atk, actionType: 'attack' }); setStep('target'); }} />
+                      onPick={() => pickAttack(atk, true)} />
+                  ))}
+                  {maSpellOptions.map(sp => (
+                    <SpellPickButton key={sp.id} sp={sp} spellcasting={attacker.spellcasting}
+                      left={usesLeft(sp)} multi onPick={() => pickMonsterSpell(sp, true)} />
                   ))}
                 </>
               )}
 
               {otherAttacks.length > 0 && (
                 <>
-                  <div className="section-heading" style={{ marginTop: maOptions.length > 0 ? 8 : 0 }}>
-                    {maOptions.length > 0 ? 'Other Attacks' : 'Attacks'}
+                  <div className="section-heading" style={{ marginTop: (maOptions.length > 0 || maSpellOptions.length > 0) ? 8 : 0 }}>
+                    {(maOptions.length > 0 || maSpellOptions.length > 0) ? 'Other Attacks' : 'Attacks'}
                   </div>
                   {otherAttacks.map((atk, i) => (
                     <AttackPickButton key={atk.id || i} atk={atk}
-                      onPick={() => { setSelectedAction({ ...atk, actionType: 'attack' }); setStep('target'); }} />
+                      onPick={() => pickAttack(atk)} />
                   ))}
                 </>
               )}
@@ -1029,50 +1097,13 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClo
                 if (list.length === 0) return null;
                 return (
                   <div key={type.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div className="section-heading" style={{ marginTop: (attacks.length > 0 || ti > 0) ? 8 : 0 }}>
+                    <div className="section-heading" style={{ marginTop: (attacks.length > 0 || maSpellOptions.length > 0 || ti > 0) ? 8 : 0 }}>
                       Spells — {type.label}
                     </div>
-                    {list.map(sp => {
-                      const left = usesLeft(sp);
-                      const exhausted = left === 0;
-                      const defense = spellDefenseLine(sp, attacker.spellcasting);
-                      return (
-                        <button key={sp.id} disabled={exhausted}
-                          onClick={() => !exhausted && pickMonsterSpell(sp)}
-                          title={exhausted ? 'No uses left today — restore a pip in the expanded panel to cast again' : ''}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '10px 14px', borderRadius: 'var(--radius-sm)',
-                            border: '1px solid var(--border)', background: 'var(--surface)',
-                            cursor: exhausted ? 'not-allowed' : 'pointer', textAlign: 'left', width: '100%',
-                            transition: 'background 0.1s', opacity: exhausted ? 0.5 : 1,
-                          }}
-                          onMouseEnter={e => { if (!exhausted) e.currentTarget.style.background = 'var(--surface2)'; }}
-                          onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
-                        >
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{sp.name || 'Unnamed Spell'}</span>
-                              <span className="tag tag-purple" style={{ fontSize: 9 }}>{spellFrequencyLabel(sp)}</span>
-                              {sp.castLevel ? <span className="tag tag-gray" style={{ fontSize: 9 }}>Lvl {sp.castLevel}</span> : null}
-                              {sp.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
-                              {[sp.effect, defense].filter(Boolean).join(' · ') || '—'}
-                            </div>
-                          </div>
-                          {left !== null && (
-                            <span style={{ fontSize: 11, fontFamily: 'DM Mono, monospace', flexShrink: 0,
-                              color: exhausted ? 'var(--accent)' : 'var(--purple-text)' }}>
-                              {exhausted ? 'none left' : `${left}/${sp.usesPerDay} left`}
-                            </span>
-                          )}
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text3)', flexShrink: 0 }}>
-                            <polyline points="9 18 15 12 9 6" />
-                          </svg>
-                        </button>
-                      );
-                    })}
+                    {list.map(sp => (
+                      <SpellPickButton key={sp.id} sp={sp} spellcasting={attacker.spellcasting}
+                        left={usesLeft(sp)} onPick={() => pickMonsterSpell(sp)} />
+                    ))}
                   </div>
                 );
               })}
@@ -1109,7 +1140,7 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClo
               )}
 
               {/* Custom / Other */}
-              <div className="section-heading" style={{ marginTop: (attacks.length > 0 || spells.length > 0) ? 8 : 0 }}>Other</div>
+              <div className="section-heading" style={{ marginTop: hasActions ? 8 : 0 }}>Other</div>
               <button onClick={() => { setSelectedAction({ name: 'Custom', actionType: 'custom', damage: '' }); setStep('target'); }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
@@ -1267,16 +1298,16 @@ function ActionModal({ attacker, combatants, onApply, onSpendSpell, onLog, onClo
                 {defenseLines.length > 0 ? (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
                     {defenseLines.map(l => (
-                      <span key={l.type} className={`tag ${l.response === 'immune' ? 'tag-green' : 'tag-amber'}`} style={{ fontSize: 10 }}>
-                        {damageTypeLabel(l.type)} {l.response === 'immune' ? 'immune' : 'resisted'}: {l.raw} → {l.final}
+                      <span key={l.type} className={`tag ${DAMAGE_RESPONSE_LABELS[l.response]?.tag ?? 'tag-gray'}`} style={{ fontSize: 10 }}>
+                        {damageTypeLabel(l.type)} {DAMAGE_RESPONSE_LABELS[l.response]?.verb ?? l.response}: {l.raw} → {l.final}
                       </span>
                     ))}
                   </div>
                 ) : notedDefenses.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
                     {notedDefenses.map(d => (
-                      <span key={d.type} className={`tag ${d.response === 'immune' ? 'tag-green' : 'tag-amber'}`} style={{ fontSize: 10 }}>
-                        {selectedTarget.name} is {d.response === 'immune' ? 'immune to' : 'resistant to'} {damageTypeLabel(d.type)}
+                      <span key={d.type} className={`tag ${DAMAGE_RESPONSE_LABELS[d.response]?.tag ?? 'tag-gray'}`} style={{ fontSize: 10 }}>
+                        {selectedTarget.name} is {DAMAGE_RESPONSE_LABELS[d.response]?.phrase ?? d.response} {damageTypeLabel(d.type)}
                       </span>
                     ))}
                   </div>

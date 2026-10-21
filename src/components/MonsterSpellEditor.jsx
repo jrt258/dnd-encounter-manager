@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import NumberInput from './NumberInput'
 import {
-  uid, EMPTY_MONSTER_SPELL, EMPTY_SPELLCASTING, SPELLCASTING_ABILITIES, SPELL_ACTION_TYPES,
+  uid, EMPTY_MONSTER_SPELL, EMPTY_SPELLCASTING, EMPTY_MULTIATTACK, SPELLCASTING_ABILITIES, SPELL_ACTION_TYPES,
   ABILITY_KEYS, ABILITY_LABELS, ABILITY_NAMES, modStr, spellAttackBonus,
   spellFrequencyLabel, spellDefenseLine, groupSpellsByFrequency,
 } from '../utils/helpers'
@@ -9,6 +9,10 @@ import {
 // Monster spellcasting editor. Monsters use one Spellcasting entry (ability,
 // save DC, attack bonus) and spells that are At Will or N/Day, cast as an
 // action, bonus action or reaction. Players keep the slot-based SpellEditor.
+// Action spells can be marked (orange) as usable in place of a Multiattack attack.
+
+const PURPLE_COLOR = { border: 'var(--purple)', bg: 'var(--purple-bg)', text: 'var(--purple-text)' }
+const MULTI_COLOR  = { border: 'var(--orange)', bg: 'var(--orange-bg)', text: 'var(--orange-text)' }
 
 function Segmented({ value, options, onChange }) {
   return (
@@ -40,17 +44,18 @@ function Segmented({ value, options, onChange }) {
   )
 }
 
-function PillToggle({ active, onChange, label }) {
+function PillToggle({ active, onChange, label, color = PURPLE_COLOR, title }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={() => onChange(!active)}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
         padding: '5px 12px', borderRadius: 99,
-        border: `1.5px solid ${active ? 'var(--purple)' : 'var(--border-strong)'}`,
-        background: active ? 'var(--purple-bg)' : 'var(--surface2)',
-        color: active ? 'var(--purple-text)' : 'var(--text2)',
+        border: `1.5px solid ${active ? color.border : 'var(--border-strong)'}`,
+        background: active ? color.bg : 'var(--surface2)',
+        color: active ? color.text : 'var(--text2)',
         fontFamily: 'DM Sans, sans-serif', fontSize: 12, fontWeight: 600,
         cursor: 'pointer', transition: 'all 0.12s', userSelect: 'none',
       }}
@@ -98,6 +103,7 @@ function SpellcastingCard({ spellcasting, onChange }) {
       <div style={{ marginTop: 10 }}>
         <div className="field-label">Spellcasting Note</div>
         <input
+          type="text"
           value={sc.note ?? ''}
           placeholder="e.g. requires no Material components"
           onChange={e => set('note', e.target.value)}
@@ -112,10 +118,17 @@ function SpellcastingCard({ spellcasting, onChange }) {
 
 // ─── One spell ────────────────────────────────────────────────────────────────
 
-function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove }) {
+function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove, showMultiattack }) {
   const update = (field, val) => onUpdate(spell.id, { [field]: val })
   const defense = spellDefenseLine(spell, spellcasting)
   const actionType = SPELL_ACTION_TYPES.find(t => t.id === spell.actionType)
+  const isAction = (spell.actionType ?? 'action') === 'action'
+  const multi = showMultiattack && isAction && !!spell.multiattack
+
+  function setActionType(val) {
+    // Only action spells can be part of Multiattack.
+    onUpdate(spell.id, val === 'action' ? { actionType: val } : { actionType: val, multiattack: false })
+  }
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: 6, overflow: 'hidden', background: 'var(--surface)' }}>
@@ -125,6 +138,7 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
           display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer',
           background: expanded ? 'var(--surface2)' : 'var(--surface)',
           borderBottom: expanded ? '1px solid var(--border)' : 'none',
+          borderLeft: multi ? '3px solid var(--orange)' : '3px solid transparent',
         }}
         onClick={onToggle}
       >
@@ -137,10 +151,11 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
             )}
             {spell.castLevel ? <span className="tag tag-gray" style={{ fontSize: 9 }}>Lvl {spell.castLevel}</span> : null}
             {spell.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
+            {multi && <span className="tag tag-orange" style={{ fontSize: 9 }}>Multiattack</span>}
           </div>
           {(defense || spell.effect) && (
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1, fontFamily: 'DM Mono, monospace' }}>
-              {[spell.effect, defense].filter(Boolean).join(' · ')}
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 1, fontFamily: 'DM Mono, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {[defense, spell.effect].filter(Boolean).join(' · ')}
             </div>
           )}
         </div>
@@ -176,7 +191,7 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 2 }}>
               <div className="field-label">Spell Name</div>
-              <input value={spell.name} placeholder="e.g. Fireball" onChange={e => update('name', e.target.value)} />
+              <input type="text" value={spell.name} placeholder="e.g. Fireball" onChange={e => update('name', e.target.value)} />
             </div>
             <div style={{ flex: 1 }}>
               <div className="field-label">Frequency</div>
@@ -209,8 +224,22 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
             <Segmented
               value={spell.actionType}
               options={SPELL_ACTION_TYPES.map(t => ({ id: t.id, label: t.label }))}
-              onChange={val => update('actionType', val)}
+              onChange={setActionType}
             />
+          </div>
+
+          {/* Toggles */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <PillToggle active={spell.concentration} onChange={val => update('concentration', val)} label="⟳ Concentration" />
+            {showMultiattack && isAction && (
+              <PillToggle
+                active={!!spell.multiattack}
+                onChange={val => update('multiattack', val)}
+                label="Multiattack"
+                color={MULTI_COLOR}
+                title="Can be cast in place of one of the attacks in Multiattack"
+              />
+            )}
           </div>
 
           {/* Cast level + Range + Duration */}
@@ -228,11 +257,11 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
             </div>
             <div style={{ flex: 1 }}>
               <div className="field-label">Range</div>
-              <input value={spell.range} placeholder="e.g. 120 ft" onChange={e => update('range', e.target.value)} />
+              <input type="text" value={spell.range} placeholder="e.g. 120 ft" onChange={e => update('range', e.target.value)} />
             </div>
             <div style={{ flex: 1 }}>
               <div className="field-label">Duration</div>
-              <input value={spell.duration} placeholder="e.g. Instantaneous" onChange={e => update('duration', e.target.value)} />
+              <input type="text" value={spell.duration} placeholder="e.g. Instantaneous" onChange={e => update('duration', e.target.value)} />
             </div>
           </div>
 
@@ -256,7 +285,7 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
               </div>
               <div style={{ flex: 2 }}>
                 <div className="field-label">On Successful Save</div>
-                <input value={spell.onSave} placeholder="e.g. half damage" onChange={e => update('onSave', e.target.value)} />
+                <input type="text" value={spell.onSave} placeholder="e.g. half damage" onChange={e => update('onSave', e.target.value)} />
               </div>
               <div style={{ fontSize: 11, color: 'var(--text3)', paddingBottom: 9, whiteSpace: 'nowrap' }}>
                 DC {spellcasting?.saveDC ?? '—'}
@@ -270,17 +299,7 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
             </div>
           )}
 
-          {/* Effect */}
-          <div>
-            <div className="field-label">Damage / Effect</div>
-            <input value={spell.effect} placeholder="e.g. 8d6 fire damage" onChange={e => update('effect', e.target.value)} />
-          </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <PillToggle active={spell.concentration} onChange={val => update('concentration', val)} label="⟳ Concentration" />
-          </div>
-
-          {/* Description */}
+          {/* Description — shown right after the save DC in the stat block */}
           <div>
             <div className="field-label">Description</div>
             <textarea
@@ -288,6 +307,17 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
               value={spell.description}
               placeholder="Spell text or special rules…"
               onChange={e => update('description', e.target.value)}
+            />
+          </div>
+
+          {/* Damage / Effect */}
+          <div>
+            <div className="field-label">Damage / Effect</div>
+            <textarea
+              rows={3}
+              value={spell.effect}
+              placeholder="e.g. 8d6 fire damage, or half as much on a successful save. The first dice and damage type are used when rolling in combat."
+              onChange={e => update('effect', e.target.value)}
             />
           </div>
         </div>
@@ -298,9 +328,13 @@ function SpellRow({ spell, spellcasting, expanded, onToggle, onUpdate, onRemove 
 
 // ─── Editor ───────────────────────────────────────────────────────────────────
 
-export default function MonsterSpellEditor({ spellcasting, spells = [], onChangeSpellcasting, onChangeSpells }) {
+export default function MonsterSpellEditor({
+  spellcasting, spells = [], onChangeSpellcasting, onChangeSpells,
+  multiattack = null, onChangeMultiattack,
+}) {
   const [expandedId, setExpandedId] = useState(null)
   const sc = spellcasting ?? EMPTY_SPELLCASTING
+  const showMultiattack = !!onChangeMultiattack
 
   function add() {
     const s = { ...EMPTY_MONSTER_SPELL, id: uid() }
@@ -310,6 +344,10 @@ export default function MonsterSpellEditor({ spellcasting, spells = [], onChange
   }
 
   function update(id, changes) {
+    // Marking a spell as a Multiattack option turns Multiattack on, same as attacks.
+    if (changes.multiattack && !multiattack && onChangeMultiattack) {
+      onChangeMultiattack({ ...EMPTY_MULTIATTACK })
+    }
     onChangeSpells(spells.map(s => s.id === id ? { ...s, ...changes } : s))
   }
 
@@ -352,6 +390,7 @@ export default function MonsterSpellEditor({ spellcasting, spells = [], onChange
                 onToggle={() => setExpandedId(expandedId === s.id ? null : s.id)}
                 onUpdate={update}
                 onRemove={remove}
+                showMultiattack={showMultiattack}
               />
             ))}
           </div>

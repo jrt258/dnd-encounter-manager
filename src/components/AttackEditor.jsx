@@ -3,7 +3,7 @@ import NumberInput from './NumberInput'
 import {
   uid, EMPTY_ATTACK, EMPTY_DAMAGE_PART, EMPTY_MULTIATTACK, MAX_EXTRA_DAMAGE, DAMAGE_TYPES,
   normalizeAttack, diceAverage, attackDamageText, attackKindLabel, attackReachText,
-  multiattackText, modStr,
+  multiattackText, multiattackSpellOptions, modStr,
 } from '../utils/helpers'
 
 // Attack editor shared by monsters and players.
@@ -123,12 +123,13 @@ function DamageRow({ label, dice, average, type, onChange, onRemove }) {
 
 // ─── Multiattack card ─────────────────────────────────────────────────────────
 
-function MultiattackCard({ multiattack, attacks, ownerName, onChange }) {
+function MultiattackCard({ multiattack, attacks, spells, ownerName, onChange }) {
   const enabled = !!multiattack
   const ma = multiattack ?? EMPTY_MULTIATTACK
   const set = (field, val) => onChange({ ...ma, [field]: val })
   const options = attacks.filter(a => a.multiattack)
-  const autoText = multiattackText({ ...ma, description: '' }, attacks, ownerName)
+  const spellOptions = multiattackSpellOptions(spells)
+  const autoText = multiattackText({ ...ma, description: '' }, attacks, ownerName, spells)
 
   return (
     <div style={{
@@ -147,6 +148,7 @@ function MultiattackCard({ multiattack, attacks, ownerName, onChange }) {
           <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? MULTI_COLOR.text : 'var(--text)' }}>Multiattack</span>
           <span style={{ display: 'block', fontSize: 11, color: 'var(--text3)', marginTop: 1 }}>
             Makes several attacks with one action. Mark which attacks can be used with the orange Multiattack toggle.
+            Action spells (such as a cantrip) can be marked the same way on the Spells tab.
           </span>
         </span>
       </label>
@@ -176,9 +178,20 @@ function MultiattackCard({ multiattack, attacks, ownerName, onChange }) {
             <span style={{ fontWeight: 700, fontStyle: 'italic', color: MULTI_COLOR.text }}>Multiattack. </span>
             {ma.description?.trim() ? ma.description.trim() : autoText}
           </div>
-          {options.length === 0 && (
+          {spellOptions.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text3)' }}>
+                Spells
+              </span>
+              {spellOptions.map(s => (
+                <span key={s.id} className="tag tag-purple" style={{ fontSize: 10 }}>{s.name || 'Unnamed Spell'}</span>
+              ))}
+              <span style={{ fontSize: 11, color: 'var(--text3)' }}>— edit on the Spells tab</span>
+            </div>
+          )}
+          {options.length === 0 && spellOptions.length === 0 && (
             <div style={{ fontSize: 11, color: 'var(--orange-text)' }}>
-              No attacks are marked as Multiattack options yet.
+              No attacks or spells are marked as Multiattack options yet.
             </div>
           )}
         </div>
@@ -387,7 +400,7 @@ function AttackRow({ attack: a, expanded, onToggle, onUpdate, onRemove, showMult
 
 // ─── Editor ───────────────────────────────────────────────────────────────────
 
-export default function AttackEditor({ attacks = [], onChange, multiattack = null, onChangeMultiattack, ownerName = '' }) {
+export default function AttackEditor({ attacks = [], onChange, multiattack = null, onChangeMultiattack, ownerName = '', spells = [] }) {
   const [expandedId, setExpandedId] = useState(null)
   const showMultiattack = !!onChangeMultiattack
   const list = attacks.map(normalizeAttack)
@@ -424,6 +437,7 @@ export default function AttackEditor({ attacks = [], onChange, multiattack = nul
         <MultiattackCard
           multiattack={multiattack}
           attacks={list}
+          spells={spells}
           ownerName={ownerName}
           onChange={onChangeMultiattack}
         />

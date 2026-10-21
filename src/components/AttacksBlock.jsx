@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import {
   normalizeAttack, attackDamageParts, formatDamagePart, attackKindLabel, attackReachText,
-  multiattackText, modStr,
+  multiattackText, multiattackSpellOptions, spellDefenseLine, spellFrequencyLabel, modStr,
 } from '../utils/helpers'
 
 // Read-only list of attacks for the library, encounter preview and combat panel.
 // Multiattack options are grouped under an orange Multiattack heading (same idea
-// as the purple At Will / X/Day spell groups); other attacks follow.
+// as the purple At Will / X/Day spell groups); other attacks follow. Spells
+// marked for Multiattack are listed in the Multiattack group too; their full
+// details stay in the Spellcasting block.
 
 function SubHeading({ children, tone = 'multi' }) {
   const multi = tone === 'multi'
@@ -75,39 +77,67 @@ function AttackLine({ atk, isLast, multi }) {
   )
 }
 
-export default function AttacksBlock({ attacks = [], multiattack = null, ownerName = '' }) {
+// A spell that can be cast as one of the Multiattack attacks.
+function SpellOptionLine({ spell, spellcasting, isLast }) {
+  const defense = spellDefenseLine(spell, spellcasting)
+  return (
+    <div style={{ borderBottom: isLast ? 'none' : '1px solid var(--border)', borderLeft: '3px solid var(--orange)', padding: '7px 12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{spell.name || 'Unnamed Spell'}</span>
+        <span className="tag tag-purple" style={{ fontSize: 9 }}>Spell · {spellFrequencyLabel(spell)}</span>
+        <span className="tag tag-orange" style={{ fontSize: 9 }}>Multiattack</span>
+      </div>
+      {defense && (
+        <div style={{ fontSize: 11, color: 'var(--accent-text)', fontFamily: 'DM Mono, monospace', marginTop: 1 }}>
+          {defense}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function AttacksBlock({ attacks = [], multiattack = null, ownerName = '', spells = [], spellcasting = null }) {
   if (!attacks.length && !multiattack) return null
   const list = attacks.map(normalizeAttack)
   const multiOn = !!multiattack
   const options = multiOn ? list.filter(a => a.multiattack) : []
+  const spellOptions = multiOn ? multiattackSpellOptions(spells) : []
   const others  = multiOn ? list.filter(a => !a.multiattack) : list
+  const hasMultiGroup = options.length > 0 || spellOptions.length > 0
 
   return (
     <div>
       {multiOn && (
         <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6, lineHeight: 1.5 }}>
           <span style={{ fontWeight: 700, fontStyle: 'italic', color: 'var(--orange-text)' }}>Multiattack. </span>
-          {multiattackText(multiattack, list, ownerName)}
+          {multiattackText(multiattack, list, ownerName, spells)}
         </div>
       )}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-        {options.length > 0 && (
-          <div>
-            <SubHeading>Multiattack · {multiattack.count ?? 2} attacks</SubHeading>
-            {options.map((a, i) => (
-              <AttackLine key={a.id || i} atk={a} multi isLast={i === options.length - 1 && others.length === 0} />
-            ))}
-          </div>
-        )}
-        {others.length > 0 && (
-          <div>
-            {multiOn && <SubHeading tone="other">Other Attacks</SubHeading>}
-            {others.map((a, i) => (
-              <AttackLine key={a.id || i} atk={a} isLast={i === others.length - 1} />
-            ))}
-          </div>
-        )}
-      </div>
+      {(hasMultiGroup || others.length > 0) && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+          {hasMultiGroup && (
+            <div>
+              <SubHeading>Multiattack · {multiattack.count ?? 2} attacks</SubHeading>
+              {options.map((a, i) => (
+                <AttackLine key={a.id || i} atk={a} multi
+                  isLast={i === options.length - 1 && spellOptions.length === 0 && others.length === 0} />
+              ))}
+              {spellOptions.map((sp, i) => (
+                <SpellOptionLine key={sp.id || i} spell={sp} spellcasting={spellcasting}
+                  isLast={i === spellOptions.length - 1 && others.length === 0} />
+              ))}
+            </div>
+          )}
+          {others.length > 0 && (
+            <div>
+              {multiOn && <SubHeading tone="other">Other Attacks</SubHeading>}
+              {others.map((a, i) => (
+                <AttackLine key={a.id || i} atk={a} isLast={i === others.length - 1} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

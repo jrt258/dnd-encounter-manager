@@ -342,13 +342,13 @@ export default function MonsterLibrary({ monsters, setMonsters, externalEditing,
                             {(m.attacks?.length > 0 || m.multiattack) && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Attacks</div>
-                                <AttacksBlock attacks={m.attacks ?? []} multiattack={m.multiattack} ownerName={m.name} />
+                                <AttacksBlock attacks={m.attacks ?? []} multiattack={m.multiattack} ownerName={m.name} spells={m.spells ?? []} spellcasting={m.spellcasting} />
                               </div>
                             )}
                             {m.spells?.length > 0 && (
                               <div>
                                 <div className="section-heading" style={{ marginTop: 0 }}>Spellcasting</div>
-                                <SpellcastingBlock spellcasting={m.spellcasting} spells={m.spells} />
+                                <SpellcastingBlock spellcasting={m.spellcasting} spells={m.spells} multiattack={m.multiattack} />
                               </div>
                             )}
                           </div>
