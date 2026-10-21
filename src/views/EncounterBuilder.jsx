@@ -156,14 +156,14 @@ function MonsterCard({ monster, onClose, onAdd, onEdit }) {
       {(m.attacks?.length > 0 || m.multiattack) && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Actions</div>
-          <AttacksBlock attacks={m.attacks ?? []} multiattack={m.multiattack} ownerName={m.name} />
+          <AttacksBlock attacks={m.attacks ?? []} multiattack={m.multiattack} ownerName={m.name} spells={m.spells ?? []} spellcasting={m.spellcasting} />
         </div>
       )}
 
       {m.spells?.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div className="section-heading" style={{ marginTop: 0 }}>Spellcasting</div>
-          <SpellcastingBlock spellcasting={m.spellcasting} spells={m.spells} />
+          <SpellcastingBlock spellcasting={m.spellcasting} spells={m.spells} multiattack={m.multiattack} />
         </div>
       )}
 

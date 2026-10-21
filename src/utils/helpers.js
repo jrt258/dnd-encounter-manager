@@ -117,6 +117,7 @@ export const EMPTY_MONSTER_SPELL = {
   duration: '',
   concentration: false,
   description: '',
+  multiattack: false,    // can replace an attack in the owner's Multiattack (action spells only)
 }
 
 // Spell attack bonus from the spellcasting block (save DC − 8 unless overridden).
@@ -211,6 +212,7 @@ export function migrateMonsterSpell(spell, index = 0) {
     duration: spell.duration ?? '',
     concentration: !!spell.concentration,
     description: spell.description ?? '',
+    multiattack: false,
   }
 }
 
@@ -289,6 +291,7 @@ export const EMPTY_MONSTER = {
   skills: [],               // [{ skill: 'perception', bonus: 4 }]
   resistances: [],          // damage types, e.g. ['poison']
   immunities: [],           // damage types, e.g. ['poison', 'psychic']
+  vulnerabilities: [],      // damage types, e.g. ['bludgeoning']
   conditionImmunities: [],  // condition ids, e.g. ['charmed', 'poisoned']
   spells: [],
   spellcasting: null,
@@ -531,21 +534,46 @@ export function multiattackOptions(attacks = []) {
   return attacks.filter(a => a?.multiattack)
 }
 
+// Spells that can be cast as part of Multiattack. Only spells cast with an
+// action qualify — a bonus action or reaction spell can't replace an attack.
+export function multiattackSpellOptions(spells = []) {
+  return spells.filter(s => s?.multiattack && (s.actionType ?? 'action') === 'action')
+}
+
+// "A", "A or B", "A, B, or C"
+function orList(names) {
+  if (names.length <= 1) return names[0] ?? ''
+  if (names.length === 2) return `${names[0]} or ${names[1]}`
+  return `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`
+}
+
 // The Multiattack sentence. Uses the custom description when one is written;
-// otherwise e.g. "The mage makes three Arcane Burst attacks." or
+// otherwise e.g. "The mage makes three Arcane Burst attacks.",
 // "The assassin makes three attacks, using Shortsword or Light Crossbow in any combination."
-export function multiattackText(multiattack, attacks = [], ownerName = '') {
+// or, with spells, "… It can replace any of these attacks with a casting of Fire Bolt."
+export function multiattackText(multiattack, attacks = [], ownerName = '', spells = []) {
   if (!multiattack) return ''
   if (multiattack.description?.trim()) return multiattack.description.trim()
   const who = ownerName ? `The ${ownerName.toLowerCase()}` : 'It'
-  const count = numberWord(multiattack.count ?? 2)
-  const names = multiattackOptions(attacks).map(a => a.name || 'Unnamed Attack')
-  if (names.length === 0) return `${who} makes ${count} attacks.`
-  if (names.length === 1) return `${who} makes ${count} ${names[0]} attacks.`
-  const list = names.length === 2
-    ? `${names[0]} or ${names[1]}`
-    : `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`
-  return `${who} makes ${count} attacks, using ${list} in any combination.`
+  const n = multiattack.count ?? 2
+  const count = numberWord(n)
+  const attackNames = multiattackOptions(attacks).map(a => a.name || 'Unnamed Attack')
+  const spellNames = multiattackSpellOptions(spells).map(s => s.name || 'Unnamed Spell')
+
+  if (attackNames.length === 0 && spellNames.length === 0) return `${who} makes ${count} attacks.`
+
+  if (attackNames.length === 0) {
+    if (spellNames.length === 1) {
+      return `${who} casts ${spellNames[0]} ${n === 2 ? 'twice' : `${count} times`}.`
+    }
+    return `${who} makes ${count} attacks, casting ${orList(spellNames)} in any combination.`
+  }
+
+  const text = attackNames.length === 1
+    ? `${who} makes ${count} ${attackNames[0]} attacks.`
+    : `${who} makes ${count} attacks, using ${orList(attackNames)} in any combination.`
+  if (spellNames.length === 0) return text
+  return `${text} It can replace any of these attacks with a casting of ${orList(spellNames)}.`
 }
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
@@ -620,21 +648,29 @@ export function hasDefenses(m) {
     (m.skills?.length ?? 0) > 0 ||
     (m.resistances?.length ?? 0) > 0 ||
     (m.immunities?.length ?? 0) > 0 ||
+    (m.vulnerabilities?.length ?? 0) > 0 ||
     (m.conditionImmunities?.length ?? 0) > 0
   )
 }
 
-// How a target takes one damage type: 'immune' | 'resistant' | 'normal'.
+// How a target takes one damage type: 'immune' | 'resistant' | 'vulnerable' | 'normal'.
+// Immunity wins over everything. A stat block never lists one type as both a
+// resistance and a vulnerability (the editor keeps them exclusive); if old data
+// does, the two cancel out (half, then double) so it is treated as normal.
 export function damageResponse(target, type) {
   const t = String(type ?? '').toLowerCase()
   if (!t || !target) return 'normal'
   if ((target.immunities ?? []).includes(t)) return 'immune'
-  if ((target.resistances ?? []).includes(t)) return 'resistant'
+  const resistant = (target.resistances ?? []).includes(t)
+  const vulnerable = (target.vulnerabilities ?? []).includes(t)
+  if (resistant && vulnerable) return 'normal'
+  if (resistant) return 'resistant'
+  if (vulnerable) return 'vulnerable'
   return 'normal'
 }
 
-// Apply a target's immunities / resistances to rolled damage. Damage of the
-// same type is added together before halving.
+// Apply a target's immunities / resistances / vulnerabilities to rolled damage.
+// Damage of the same type is added together before halving or doubling.
 // rolled: [{ type, amount, breakdown? }] → { total, lines: [{ type, raw, final, response }] }
 export function applyDamageDefenses(rolled, target) {
   const byType = new Map()
@@ -644,10 +680,31 @@ export function applyDamageDefenses(rolled, target) {
   }
   const lines = [...byType.entries()].map(([type, raw]) => {
     const response = damageResponse(target, type)
-    const final = response === 'immune' ? 0 : response === 'resistant' ? Math.floor(raw / 2) : raw
+    const final =
+      response === 'immune'     ? 0 :
+      response === 'resistant'  ? Math.floor(raw / 2) :
+      response === 'vulnerable' ? raw * 2 :
+      raw
     return { type, raw, final, response }
   })
   return { total: lines.reduce((s, l) => s + l.final, 0), lines }
+}
+
+// Short labels for showing a damage response, e.g. on combat tags.
+export const DAMAGE_RESPONSE_LABELS = {
+  immune:     { verb: 'immune',     phrase: 'immune to',     tag: 'tag-green' },
+  resistant:  { verb: 'resisted',   phrase: 'resistant to',  tag: 'tag-amber' },
+  vulnerable: { verb: 'vulnerable', phrase: 'vulnerable to', tag: 'tag-red'   },
+}
+
+// The damage type named in free spell text, e.g. "3d6 fire damage" → 'fire'.
+// Only matches "<type> damage" so words like "piercing gaze" don't count.
+export function damageTypeFromText(text) {
+  const s = String(text ?? '').toLowerCase()
+  for (const t of DAMAGE_TYPES) {
+    if (new RegExp(`\\b${t}\\s+damage\\b`).test(s)) return t
+  }
+  return ''
 }
 
 // Player spells still use levels and slots.

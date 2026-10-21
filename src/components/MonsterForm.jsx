@@ -20,6 +20,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
     speeds: {},
     resistances: [],
     immunities: [],
+    vulnerabilities: [],
     conditionImmunities: [],
     ...(initial ?? {}),
     // New monsters start as Medium; an existing monster with no size stays unset
@@ -35,6 +36,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
     (data.skills?.length ?? 0) +
     (data.resistances?.length ?? 0) +
     (data.immunities?.length ?? 0) +
+    (data.vulnerabilities?.length ?? 0) +
     (data.conditionImmunities?.length ?? 0)
 
   function handleSave() {
@@ -230,6 +232,7 @@ export default function MonsterForm({ initial, onSave, onClose }) {
           multiattack={data.multiattack ?? null}
           onChangeMultiattack={val => set('multiattack', val)}
           ownerName={data.name}
+          spells={data.spells ?? []}
         />
       )}
 
@@ -240,6 +243,8 @@ export default function MonsterForm({ initial, onSave, onClose }) {
           spells={data.spells ?? []}
           onChangeSpellcasting={val => set('spellcasting', val)}
           onChangeSpells={val => set('spells', val)}
+          multiattack={data.multiattack ?? null}
+          onChangeMultiattack={val => set('multiattack', val)}
         />
       )}
 

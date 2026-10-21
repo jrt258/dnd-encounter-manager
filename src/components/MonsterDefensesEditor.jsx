@@ -4,12 +4,16 @@ import {
   skillDef, defaultSkillBonus, proficiencyBonusForCR, abilityMod, modStr, sortedSkills,
 } from '../utils/helpers'
 
-// Skills, damage resistances, damage immunities and condition immunities for a
-// monster. Every section is optional — most stat blocks only use a few.
-// Colour key: amber = resistance, green = immunity.
+// Skills, damage resistances, immunities and vulnerabilities, and condition
+// immunities for a monster. Every section is optional — most stat blocks only
+// use a few.
+// Colour key: amber = resistance, green = immunity, red = vulnerability.
 
-const RESIST = { border: 'var(--amber)', bg: 'var(--amber-bg)', text: 'var(--amber-text)' }
-const IMMUNE = { border: 'var(--green)', bg: 'var(--green-bg)', text: 'var(--green-text)' }
+const RESIST = { border: 'var(--amber)',  bg: 'var(--amber-bg)',  text: 'var(--amber-text)' }
+const IMMUNE = { border: 'var(--green)',  bg: 'var(--green-bg)',  text: 'var(--green-text)' }
+const VULNER = { border: 'var(--accent)', bg: 'var(--accent-bg)', text: 'var(--accent-text)' }
+
+const DEFENSE_NAMES = { resistances: 'resistant', immunities: 'immune', vulnerabilities: 'vulnerable' }
 
 function Chip({ label, active, color, onClick, title }) {
   return (
@@ -51,6 +55,7 @@ export default function MonsterDefensesEditor({ data, onChange }) {
   const skills = data.skills ?? []
   const resistances = data.resistances ?? []
   const immunities = data.immunities ?? []
+  const vulnerabilities = data.vulnerabilities ?? []
   const conditionImmunities = data.conditionImmunities ?? []
   const pb = proficiencyBonusForCR(data.cr)
 
@@ -75,19 +80,24 @@ export default function MonsterDefensesEditor({ data, onChange }) {
     onChange({ skills: skills.filter((_, i) => i !== index) })
   }
 
-  // ── Damage defenses (a type is either resisted or immune, never both) ──
-  function toggleResistance(type) {
-    onChange({
-      resistances: toggle(resistances, type),
-      immunities: immunities.filter(t => t !== type),
-    })
+  // ── Damage defenses ──
+  // A damage type sits in at most one list: resisted, immune or vulnerable.
+  // Selecting it in one list removes it from the other two.
+  const lists = { resistances, immunities, vulnerabilities }
+
+  function toggleDefense(field, type) {
+    const next = {}
+    for (const key of Object.keys(lists)) {
+      next[key] = key === field ? toggle(lists[key], type) : lists[key].filter(t => t !== type)
+    }
+    onChange(next)
   }
 
-  function toggleImmunity(type) {
-    onChange({
-      immunities: toggle(immunities, type),
-      resistances: resistances.filter(t => t !== type),
-    })
+  // Tooltip for a chip whose type is currently in a different list.
+  function switchTitle(field, type) {
+    const current = Object.keys(lists).find(key => key !== field && lists[key].includes(type))
+    if (!current) return undefined
+    return `Currently ${DEFENSE_NAMES[current]} — selecting this switches it to ${DEFENSE_NAMES[field]}`
   }
 
   const preview = sortedSkills(skills)
@@ -154,8 +164,8 @@ export default function MonsterDefensesEditor({ data, onChange }) {
       <Section title="Damage Resistances" hint="Takes half damage of these types.">
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
           {DAMAGE_TYPES.map(t => (
-            <Chip key={t} label={cap(t)} color={RESIST} active={resistances.includes(t)} onClick={() => toggleResistance(t)}
-              title={immunities.includes(t) ? 'Currently immune — selecting this switches it to a resistance' : undefined} />
+            <Chip key={t} label={cap(t)} color={RESIST} active={resistances.includes(t)}
+              onClick={() => toggleDefense('resistances', t)} title={switchTitle('resistances', t)} />
           ))}
         </div>
       </Section>
@@ -164,8 +174,18 @@ export default function MonsterDefensesEditor({ data, onChange }) {
       <Section title="Damage Immunities" hint="Takes no damage of these types.">
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
           {DAMAGE_TYPES.map(t => (
-            <Chip key={t} label={cap(t)} color={IMMUNE} active={immunities.includes(t)} onClick={() => toggleImmunity(t)}
-              title={resistances.includes(t) ? 'Currently resistant — selecting this switches it to an immunity' : undefined} />
+            <Chip key={t} label={cap(t)} color={IMMUNE} active={immunities.includes(t)}
+              onClick={() => toggleDefense('immunities', t)} title={switchTitle('immunities', t)} />
+          ))}
+        </div>
+      </Section>
+
+      {/* Damage vulnerabilities */}
+      <Section title="Damage Vulnerabilities" hint="Takes double damage of these types.">
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          {DAMAGE_TYPES.map(t => (
+            <Chip key={t} label={cap(t)} color={VULNER} active={vulnerabilities.includes(t)}
+              onClick={() => toggleDefense('vulnerabilities', t)} title={switchTitle('vulnerabilities', t)} />
           ))}
         </div>
       </Section>

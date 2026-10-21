@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   groupSpellsByFrequency, isLimitedSpell, spellFrequencyLabel,
   spellDefenseLine, spellcastingSummary,
@@ -29,39 +28,38 @@ function UsePips({ total, used, onSet }) {
   )
 }
 
-function SpellLine({ spell, spellcasting, used, onSetUses, showFrequency, isLast }) {
-  const [open, setOpen] = useState(false)
+// One spell, laid out top to bottom:
+//   Name + tags                                   [uses]
+//   DEX save DC 15 · half damage on save          ← save DC / to-hit first
+//   Description text…                             ← always shown
+//   Effect: 8d6 fire damage…                      ← full sentence, wraps
+//   120 ft · Instantaneous
+function SpellLine({ spell, spellcasting, used, onSetUses, showFrequency, showMultiattack, isLast }) {
   const limited = isLimitedSpell(spell)
   const remaining = limited ? Math.max(0, spell.usesPerDay - used) : null
   const exhausted = limited && remaining === 0
   const defense = spellDefenseLine(spell, spellcasting)
+  const description = spell.description?.trim()
+  const effect = spell.effect?.trim()
   const details = [spell.range, spell.duration].filter(Boolean).join(' · ')
-  const hasMore = !!(spell.description?.trim() || details)
+  const multi = showMultiattack && spell.multiattack && (spell.actionType ?? 'action') === 'action'
 
   return (
-    <div style={{ borderBottom: isLast ? 'none' : '1px solid var(--border)' }}>
-      <div
-        onClick={() => hasMore && setOpen(o => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
-          cursor: hasMore ? 'pointer' : 'default', opacity: exhausted ? 0.55 : 1,
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', textDecoration: exhausted ? 'line-through' : 'none' }}>
-              {spell.name || 'Unnamed Spell'}
-            </span>
-            {showFrequency && <span className="tag tag-purple" style={{ fontSize: 9 }}>{spellFrequencyLabel(spell)}</span>}
-            {spell.castLevel ? <span className="tag tag-gray" style={{ fontSize: 9 }}>Lvl {spell.castLevel}</span> : null}
-            {spell.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
-          </div>
-          {(defense || spell.effect) && (
-            <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', display: 'flex', flexWrap: 'wrap', gap: '0 10px', marginTop: 1 }}>
-              {spell.effect && <span>{spell.effect}</span>}
-              {defense && <span style={{ color: 'var(--accent-text)' }}>{defense}</span>}
-            </div>
-          )}
+    <div style={{
+      borderBottom: isLast ? 'none' : '1px solid var(--border)',
+      borderLeft: multi ? '3px solid var(--orange)' : '3px solid transparent',
+      padding: '7px 12px', opacity: exhausted ? 0.55 : 1,
+    }}>
+      {/* Name, tags and uses */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', textDecoration: exhausted ? 'line-through' : 'none' }}>
+            {spell.name || 'Unnamed Spell'}
+          </span>
+          {showFrequency && <span className="tag tag-purple" style={{ fontSize: 9 }}>{spellFrequencyLabel(spell)}</span>}
+          {spell.castLevel ? <span className="tag tag-gray" style={{ fontSize: 9 }}>Lvl {spell.castLevel}</span> : null}
+          {spell.concentration && <span className="tag tag-amber" style={{ fontSize: 9 }}>⟳ Conc.</span>}
+          {multi && <span className="tag tag-orange" style={{ fontSize: 9 }}>Multiattack</span>}
         </div>
         {limited && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -77,18 +75,33 @@ function SpellLine({ spell, spellcasting, used, onSetUses, showFrequency, isLast
             />
           </div>
         )}
-        {hasMore && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            style={{ color: 'var(--text3)', flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        )}
       </div>
-      {open && hasMore && (
-        <div style={{ padding: '6px 12px 8px', fontSize: 11, color: 'var(--text2)', lineHeight: 1.5, background: 'var(--surface2)', borderTop: '1px solid var(--border)' }}>
-          {details && <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text3)', marginBottom: spell.description ? 4 : 0 }}>{details}</div>}
-          {spell.description}
+
+      {/* Save DC / spell attack */}
+      {defense && (
+        <div style={{ fontSize: 11, color: 'var(--accent-text)', fontFamily: 'DM Mono, monospace', marginTop: 2 }}>
+          {defense}
+        </div>
+      )}
+
+      {/* Description */}
+      {description && (
+        <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+          {description}
+        </div>
+      )}
+
+      {/* Damage / effect */}
+      {effect && (
+        <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+          <span style={{ fontStyle: 'italic', color: 'var(--text)' }}>Effect: </span>{effect}
+        </div>
+      )}
+
+      {/* Range · duration */}
+      {details && (
+        <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono, monospace', marginTop: 4 }}>
+          {details}
         </div>
       )}
     </div>
@@ -106,7 +119,8 @@ function SubHeading({ children }) {
   )
 }
 
-export default function SpellcastingBlock({ spellcasting, spells = [], usedSpells, onSetUses }) {
+export default function SpellcastingBlock({ spellcasting, spells = [], usedSpells, onSetUses, multiattack = null }) {
+  const showMultiattack = !!multiattack
   if (!spells.length) return null
 
   const actionSpells   = spells.filter(s => (s.actionType ?? 'action') === 'action')
@@ -129,7 +143,7 @@ export default function SpellcastingBlock({ spellcasting, spells = [], usedSpell
           <div key={`a-${group.key}`}>
             <SubHeading>{group.label}</SubHeading>
             {group.spells.map((sp, i) => (
-              <SpellLine key={sp.id ?? i} spell={sp} spellcasting={spellcasting}
+              <SpellLine key={sp.id ?? i} spell={sp} spellcasting={spellcasting} showMultiattack={showMultiattack}
                 used={usedOf(sp)} onSetUses={onSetUses} isLast={i === group.spells.length - 1} />
             ))}
           </div>
